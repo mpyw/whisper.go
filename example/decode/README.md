@@ -48,8 +48,10 @@ Every decoder also uses [pkg/errors](https://github.com/pkg/errors) (BSD-2-Claus
 
 1. `decode` opens the file with beep's decoder for its extension.
 2. beep gives every source as stereo, a mono one in both channels. `lowPass` takes the mean of the two as the mono sample.
-3. `lowPass` filters out what is above 8 kHz, half of 16 kHz. `beep.Resample` filters nothing, so it would fold that into the speech. This makes decoding about 4 times slower: 3.8 s for 10 minutes of 48 kHz stereo, on an Apple M2 Pro.
-4. `beep.Resample` converts it to 16 kHz.
+3. `beep.Resample` converts it to 16 kHz. It filters nothing, so `lowPass` filters around it:
+   - From a higher rate, `lowPass` first removes what is above 8 kHz, half of 16 kHz, which `beep.Resample` would fold into the speech. This makes decoding about 4 times slower: 3.8 s for 10 minutes of 48 kHz stereo, on an Apple M2 Pro.
+   - From a lower rate, `beep.Resample` adds copies of the speech above half that rate, which `lowPass` removes after.
+4. A 16 kHz source passes through both unchanged.
 5. `Transcribe` returns the segments, which it prints.
 
 This is its own Go module. Its `go.mod` builds against this checkout of whisper.go, through `replace`.

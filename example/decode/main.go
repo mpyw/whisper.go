@@ -83,7 +83,18 @@ func decode(path string) ([]float32, error) {
 		return nil, fmt.Errorf("%d channels: mix them to mono with ffmpeg first", format.NumChannels)
 	}
 
-	r := beep.Resample(4, format.SampleRate, whisper.SampleRate, newLowPass(s, int(format.SampleRate)))
+	// beep.Resample filters nothing. Down to 16 kHz, it would fold what is
+	// above 8 kHz into the speech, so lowPass removes that first. Up to
+	// 16 kHz, it makes copies of the speech above half the old rate: from
+	// 8 kHz, a 3 kHz tone came back with one at 5 kHz, at -16 dB. lowPass
+	// removes them after.
+	rate := int(format.SampleRate)
+	var r beep.Streamer
+	if rate > whisper.SampleRate {
+		r = beep.Resample(4, format.SampleRate, whisper.SampleRate, newLowPass(s, rate, 7500, 2000))
+	} else {
+		r = newLowPass(beep.Resample(4, format.SampleRate, whisper.SampleRate, s), whisper.SampleRate, rate/2, 1000)
+	}
 	var pcm []float32
 	buf := make([][2]float64, 4096)
 	for {
@@ -106,10 +117,9 @@ func decode(path string) ([]float32, error) {
 	return pcm, nil
 }
 
-// lowPass mixes a source to mono, and removes what lies above 8 kHz, half
-// of whisper.SampleRate. beep.Resample filters nothing, so it would fold
-// that into the speech. lowPass is a windowed-sinc filter: it passes up to
-// 6.5 kHz, stops from 8.5 kHz, and delays nothing.
+// lowPass mixes a source to mono, and removes what lies above a cutoff. It
+// is a windowed-sinc filter: it passes up to cutoff-width/2, stops from
+// cutoff+width/2, and delays nothing.
 type lowPass struct {
 	s    beep.Streamer
 	h    []float64    // the filter, of 2*half+1 taps
@@ -118,12 +128,12 @@ type lowPass struct {
 	done bool         // s has ended
 }
 
-// newLowPass filters s, sampled at rate. A rate up to whisper.SampleRate
-// has nothing to remove, and is only mixed.
-func newLowPass(s beep.Streamer, rate int) *lowPass {
-	const cutoff, width = 7500, 2000 // Hz
+// newLowPass filters s, sampled at rate, at cutoff Hz, with a transition
+// width Hz wide. A cutoff at half the rate or above has nothing to remove,
+// and only mixes.
+func newLowPass(s beep.Streamer, rate, cutoff, width int) *lowPass {
 	half := 0
-	if rate > whisper.SampleRate {
+	if 2*cutoff < rate {
 		half = 11 * rate / (4 * width) // a Blackman window is 5.5 rate/width taps
 	}
 	fc := float64(cutoff) / float64(rate)

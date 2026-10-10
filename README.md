@@ -45,7 +45,7 @@ It needs no cgo and no Wasm runtime: `go build` is enough.
 > | Your audio | How | Example |
 > | --- | --- | --- |
 > | WAV of 16-bit PCM, mono, at 16 kHz | The standard library: read the `data` chunk, and divide each sample by 32768. | [`example/jfk`](example/jfk) |
-> | WAV of 8, 16 or 24-bit PCM, MP3, FLAC or Ogg Vorbis, at any rate, mono or stereo | [beep](https://github.com/gopxl/beep) (MIT), in pure Go: decode, average the two channels, filter out what is above 8 kHz, and `beep.Resample` to 16 kHz. | [`example/decode`](example/decode) |
+> | WAV of 8, 16 or 24-bit PCM, MP3, FLAC or Ogg Vorbis, at any rate, mono or stereo | [beep](https://github.com/gopxl/beep) (MIT), in pure Go: decode, average the two channels, `beep.Resample` to 16 kHz, and filter out what it folds or copies. | [`example/decode`](example/decode) |
 > | Anything else: AAC, Opus, video, WAV of 32-bit or float PCM, more than 2 channels | [ffmpeg](https://ffmpeg.org), not Go: `ffmpeg -i in.m4a -ar 16000 -ac 1 -f f32le out.raw` | |
 >
 > With beep:
@@ -56,8 +56,14 @@ It needs no cgo and no Wasm runtime: `go build` is enough.
 > 	return nil, err
 > }
 > defer s.Close()
-> // newLowPass, in example/decode, mixes to mono and filters out what is above 8 kHz.
-> r := beep.Resample(4, format.SampleRate, whisper.SampleRate, newLowPass(s, int(format.SampleRate)))
+> // newLowPass, in example/decode, mixes to mono and filters out what is above a cutoff.
+> rate := int(format.SampleRate)
+> var r beep.Streamer
+> if rate > whisper.SampleRate {
+> 	r = beep.Resample(4, format.SampleRate, whisper.SampleRate, newLowPass(s, rate, 7500, 2000))
+> } else {
+> 	r = newLowPass(beep.Resample(4, format.SampleRate, whisper.SampleRate, s), whisper.SampleRate, rate/2, 1000)
+> }
 > var pcm []float32
 > buf := make([][2]float64, 4096)
 > for {
@@ -74,6 +80,7 @@ It needs no cgo and no Wasm runtime: `go build` is enough.
 >
 > `beep.Resample` filters nothing. What is above 8 kHz, which 16 kHz cannot hold, would fold into the speech: a 9 kHz tone at 44.1 kHz came out as one at 7 kHz, at full strength.
 > [`example/decode`](example/decode/main.go)'s `lowPass` removes it first.
+> Up from a lower rate, it adds copies of the speech above half that rate: from 8 kHz, a 3 kHz tone came out with one at 5 kHz, at -16 dB. `lowPass` removes them after.
 
 whisper.go is a library. For a command-line tool, use whisper.cpp's own `whisper-cli`: it reads audio files, and can use a GPU.
 

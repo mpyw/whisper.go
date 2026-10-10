@@ -140,6 +140,31 @@ func TestDecodeAlias(t *testing.T) {
 	}
 }
 
+// amplitude is the amplitude of the sine of freq Hz in pcm, without 50 ms
+// at each end.
+func amplitude(pcm []float32, freq float64) float64 {
+	pcm = pcm[800 : len(pcm)-800]
+	var re, im float64
+	for i, v := range pcm {
+		a := 2 * math.Pi * freq * float64(i) / whisper.SampleRate
+		re += float64(v) * math.Cos(a)
+		im += float64(v) * math.Sin(a)
+	}
+	return 2 * math.Hypot(re, im) / float64(len(pcm))
+}
+
+// TestDecodeImage decodes a 3 kHz sine at 8 kHz. beep.Resample adds a copy
+// of it at 5 kHz, which must go.
+func TestDecodeImage(t *testing.T) {
+	pcm, err := decode(writeWAV(t, 8000, 1, 0, sine(3000)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := amplitude(pcm, 5000) / amplitude(pcm, 3000); got > 0.001 {
+		t.Errorf("5 kHz at %.4f of 3 kHz, want 0.001 or less", got)
+	}
+}
+
 func TestDecodeErrors(t *testing.T) {
 	for _, tt := range []struct {
 		name string
