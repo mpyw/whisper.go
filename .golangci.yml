@@ -1,0 +1,71 @@
+version: "2"
+
+# depguard keeps each package to the layer it belongs to. Every rule is an
+# allow list (strict): an import outside it is reported. Rules whose files
+# match all apply, so a file must pass each of them.
+linters:
+  default: standard
+  enable:
+    - depguard
+  settings:
+    # Every error is checked, or dropped with _ = and a reason. None of the
+    # default exclusions, such as Close and fmt.Fprint*, apply.
+    errcheck:
+      check-type-assertions: true
+      disable-default-exclusions: true
+    depguard:
+      rules:
+        everywhere:
+          files:
+            - $all
+          deny:
+            - pkg: C
+              desc: whisper.go is pure Go; cgo would bring back a C toolchain
+            - pkg: io/ioutil
+              desc: deprecated; use io and os
+            - pkg: log
+              desc: return the error, or write to the caller's Options.Log
+            - pkg: log/slog
+              desc: return the error, or write to the caller's Options.Log
+
+        # Raw memory is the address space memory_windows.go reserves.
+        no-unsafe:
+          files:
+            - $all
+            - "!**/internal/host/memory_windows.go"
+          deny:
+            - pkg: unsafe
+              desc: the module's memory is a []byte; use encoding/binary
+
+        # Package whisper: the public API over whisper.go-wasm's module and its host.
+        whisper:
+          list-mode: strict
+          files:
+            - $all
+            - "!$test"
+            - "!**/internal/**"
+          allow:
+            - $gostd
+            - github.com/mpyw/whisper.go-wasm$
+            - github.com/mpyw/whisper.go/internal/host$
+
+        # What the module imports. ABI.md in whisper.go-wasm lists it.
+        host:
+          list-mode: strict
+          files:
+            - "**/internal/host/*.go"
+            - "!$test"
+          allow:
+            - $gostd
+            - github.com/mpyw/whisper.go-wasm$
+            - golang.org/x/sys/unix$
+            - golang.org/x/sys/windows$
+
+        # Tests use the public API, as users would.
+        tests:
+          list-mode: strict
+          files:
+            - $test
+          allow:
+            - $gostd
+            - github.com/mpyw/whisper.go$

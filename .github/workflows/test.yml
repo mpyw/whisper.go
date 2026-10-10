@@ -1,0 +1,54 @@
+name: test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: jdx/mise-action@v4
+
+      # The tests' model, 32 MB from Hugging Face. Its digest is in the
+      # test, which never changes it without changing the key.
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/whisper-model.bin
+          key: whisper-model-${{ hashFiles('whisper_test.go') }}
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+        env:
+          WHISPER_TEST_MODEL: ${{ runner.temp }}/whisper-model.bin
+
+      # Their results do not depend on the OS.
+      - name: Lint
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          mise exec -- golangci-lint run ./...
+          mise exec -- declscope shrink ./...
+          mise exec -- declscope ./...
