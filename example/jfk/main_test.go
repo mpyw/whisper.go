@@ -68,6 +68,7 @@ func TestReadWAV(t *testing.T) {
 		{"no fmt chunk", wavFile(data), nil},
 		{"no data chunk", wavFile(format), nil},
 		{"cut short in the fmt chunk", wavFile(format[:12]), nil},
+		{"a fmt chunk under 16 bytes", wavFile(wavChunk("fmt ", 14, format[8:22]), data), nil},
 		{"not a WAV file", []byte("ID3\x04 an MP3 file"), nil},
 	} {
 		got, err := readWAV(tt.file)
