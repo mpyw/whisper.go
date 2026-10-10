@@ -83,18 +83,7 @@ func decode(path string) ([]float32, error) {
 		return nil, fmt.Errorf("%d channels: mix them to mono with ffmpeg first", format.NumChannels)
 	}
 
-	// beep.Resample filters nothing. Down to 16 kHz, it would fold what is
-	// above 8 kHz into the speech, so lowPass removes that first. Up to
-	// 16 kHz, it makes copies of the speech above half the old rate: from
-	// 8 kHz, a 3 kHz tone came back with one at 5 kHz, at -16 dB. lowPass
-	// removes them after.
-	rate := int(format.SampleRate)
-	var r beep.Streamer
-	if rate > whisper.SampleRate {
-		r = beep.Resample(4, format.SampleRate, whisper.SampleRate, newLowPass(s, rate, 7500, 2000))
-	} else {
-		r = newLowPass(beep.Resample(4, format.SampleRate, whisper.SampleRate, s), whisper.SampleRate, rate/2, 1000)
-	}
+	r := to16k(s, int(format.SampleRate))
 	var pcm []float32
 	buf := make([][2]float64, 4096)
 	for {
@@ -115,6 +104,28 @@ func decode(path string) ([]float32, error) {
 		return nil, errors.New("no samples")
 	}
 	return pcm, nil
+}
+
+// to16k resamples s, mono or stereo at rate, to mono at whisper.SampleRate.
+//
+// beep.Resample filters nothing. Down to 16 kHz, it would fold what is
+// above 8 kHz into the speech, so lowPass removes that first. Up from a
+// lower rate, it makes copies of the speech at the old rate's multiples,
+// plus and minus each frequency. From 11.025 kHz straight to 16 kHz, the
+// copy of a 4 kHz tone at 15.025 kHz folded to 975 Hz, at -36 dB, where no
+// filter after can reach it. Up to 48 kHz, three times 16 kHz, the copies
+// stay above 8 kHz: lowPass removes them there, and 48 kHz to 16 kHz keeps
+// every third sample. README.md lists what is left, by rate.
+func to16k(s beep.Streamer, rate int) beep.Streamer {
+	const up = 3 * whisper.SampleRate
+	switch {
+	case rate > whisper.SampleRate:
+		return beep.Resample(4, beep.SampleRate(rate), whisper.SampleRate, newLowPass(s, rate, 7500, 2000))
+	case rate < whisper.SampleRate:
+		return beep.Resample(4, up, whisper.SampleRate, newLowPass(beep.Resample(4, beep.SampleRate(rate), up, s), up, rate/2, 1000))
+	default:
+		return newLowPass(s, rate, rate/2, 0) // it only mixes
+	}
 }
 
 // lowPass mixes a source to mono, and removes what lies above a cutoff. It

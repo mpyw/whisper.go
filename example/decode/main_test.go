@@ -140,9 +140,9 @@ func TestDecodeAlias(t *testing.T) {
 	}
 }
 
-// amplitude is the amplitude of the sine of freq Hz in pcm, without 50 ms
-// at each end.
-func amplitude(pcm []float32, freq float64) float64 {
+// residual is what is left of pcm, without 50 ms at each end, once the
+// sine of freq Hz is taken out, as a part of that sine.
+func residual(pcm []float32, freq float64) float64 {
 	pcm = pcm[800 : len(pcm)-800]
 	var re, im float64
 	for i, v := range pcm {
@@ -150,18 +150,28 @@ func amplitude(pcm []float32, freq float64) float64 {
 		re += float64(v) * math.Cos(a)
 		im += float64(v) * math.Sin(a)
 	}
-	return 2 * math.Hypot(re, im) / float64(len(pcm))
+	re, im = 2*re/float64(len(pcm)), 2*im/float64(len(pcm))
+	var rest float64
+	for i, v := range pcm {
+		a := 2 * math.Pi * freq * float64(i) / whisper.SampleRate
+		d := float64(v) - re*math.Cos(a) - im*math.Sin(a)
+		rest += d * d
+	}
+	return math.Sqrt(2*rest/float64(len(pcm))) / math.Hypot(re, im)
 }
 
-// TestDecodeImage decodes a 3 kHz sine at 8 kHz. beep.Resample adds a copy
-// of it at 5 kHz, which must go.
+// TestDecodeImage decodes a 3 kHz sine at rates below whisper.SampleRate.
+// beep.Resample adds copies of it, at 5 kHz from 8 kHz and at 1975 Hz from
+// 11.025 kHz, which must go.
 func TestDecodeImage(t *testing.T) {
-	pcm, err := decode(writeWAV(t, 8000, 1, 0, sine(3000)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := amplitude(pcm, 5000) / amplitude(pcm, 3000); got > 0.001 {
-		t.Errorf("5 kHz at %.4f of 3 kHz, want 0.001 or less", got)
+	for _, rate := range []int{8000, 11025, 12000} {
+		pcm, err := decode(writeWAV(t, rate, 1, 0, sine(3000)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := residual(pcm, 3000); got > 0.001 {
+			t.Errorf("%d Hz: %.4f of the 3 kHz sine is something else, want 0.001 or less", rate, got)
+		}
 	}
 }
 

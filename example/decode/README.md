@@ -33,6 +33,23 @@ Every decoder also uses [pkg/errors](https://github.com/pkg/errors) (BSD-2-Claus
 > go-mp3 keeps the silence the MP3 encoder adds, which ffmpeg removes. jfk's samples from an MP3 began 51 ms late, and ran 76 ms longer.
 > whisper.cpp's times can move more than that: jfk's first segment ended at 7.44 s from an MP3, and at 7.74 s from the WAV.
 
+## What resampling leaves
+
+`beep.Resample` only interpolates, so the filters around it cannot remove every false tone.
+The worst left, against a test tone, measured through `decode` over tones up to each filter's pass edge:
+
+| Source rate | Worst false tone |
+| --- | --- |
+| 8 kHz | -81 dB |
+| 11.025 kHz | -46 dB |
+| 12 kHz | -78 dB |
+| 16 kHz | None: it is only mixed |
+| 22.05 kHz | -32 dB, from a 6.5 kHz tone folded to 450 Hz |
+| 44.1, 48 or 96 kHz | -76 dB or less |
+
+Speech recognition copes with these. jfk, resampled by ffmpeg to each rate and back through `decode`, transcribed the same from 11.025 to 96 kHz. From 8 kHz, "Americans" became "American", as it did when ffmpeg resampled the 8 kHz file instead: 8 kHz holds nothing above 4 kHz.
+For the cleanest samples, resample with ffmpeg instead: `ffmpeg -i in.flac -ar 16000 -ac 1 -f f32le out.raw`.
+
 ## Tasks
 
 | Task | What it does |
@@ -48,10 +65,10 @@ Every decoder also uses [pkg/errors](https://github.com/pkg/errors) (BSD-2-Claus
 
 1. `decode` opens the file with beep's decoder for its extension.
 2. beep gives every source as stereo, a mono one in both channels. `lowPass` takes the mean of the two as the mono sample.
-3. `beep.Resample` converts it to 16 kHz. It filters nothing, so `lowPass` filters around it:
+3. `to16k` converts it to 16 kHz with `beep.Resample`. That filters nothing, so `lowPass` filters around it:
    - From a higher rate, `lowPass` first removes what is above 8 kHz, half of 16 kHz, which `beep.Resample` would fold into the speech. This makes decoding about 4 times slower: 3.8 s for 10 minutes of 48 kHz stereo, on an Apple M2 Pro.
-   - From a lower rate, `beep.Resample` adds copies of the speech above half that rate, which `lowPass` removes after.
-4. A 16 kHz source passes through both unchanged.
+   - From a lower rate, `beep.Resample` adds copies of the speech above half that rate, and straight to 16 kHz some fold into the speech. `to16k` resamples to 48 kHz first, where `lowPass` removes the copies, and then keeps every third sample.
+4. A 16 kHz source is only mixed.
 5. `Transcribe` returns the segments, which it prints.
 
 This is its own Go module. Its `go.mod` builds against this checkout of whisper.go, through `replace`.
