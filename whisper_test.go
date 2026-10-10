@@ -466,3 +466,23 @@ func TestTranscribeLanguageNUL(t *testing.T) {
 		t.Error("Transcribe accepted a language with a NUL")
 	}
 }
+
+// TestTranscribeWithinAudio cuts testdata/jfk.wav short in words. whisper.cpp
+// timed the last segment by its timestamp token, which the model put up to
+// 2 s past the end: for the first 9 s, it ended at 10.96 s. Parts of a long
+// recording, transcribed apart, then overlapped.
+func TestTranscribeWithinAudio(t *testing.T) {
+	m := testNew(t)
+	jfk := testWAV(t, "testdata/jfk.wav")
+	for _, cut := range []time.Duration{4100 * time.Millisecond, 5500 * time.Millisecond, 9 * time.Second} {
+		res, err := m.Transcribe(context.Background(), jfk[:int(cut.Seconds()*whisper.SampleRate)], &whisper.TranscribeOptions{Threads: 4})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range res.Segments {
+			if s.Start > cut || s.End > cut {
+				t.Errorf("%v of audio: segment %+v ends after it", cut, s)
+			}
+		}
+	}
+}

@@ -80,7 +80,8 @@ type Result struct {
 	Segments []Segment
 }
 
-// Segment is a span of the transcription.
+// Segment is a span of the transcription. Start and End are within the
+// audio given.
 type Segment struct {
 	Start, End time.Duration
 	Text       string
@@ -205,11 +206,15 @@ func (m *Model) Transcribe(ctx context.Context, pcm []float32, opts *TranscribeO
 			return
 		}
 		res.Language = m.str(m.mod.Xgw_lang(m.ctx))
+		// whisper.cpp times a segment by the model's timestamp tokens,
+		// which may point up to 2 s past the end of the audio, into the
+		// silence it pads with.
+		end := time.Duration(len(pcm)) * time.Second / SampleRate
 		for i := range m.mod.Xgw_n_segments(m.ctx) {
 			res.Segments = append(res.Segments, Segment{
 				// whisper.cpp counts time in units of 10 ms.
-				Start: time.Duration(m.mod.Xgw_segment_t0(m.ctx, i)) * 10 * time.Millisecond,
-				End:   time.Duration(m.mod.Xgw_segment_t1(m.ctx, i)) * 10 * time.Millisecond,
+				Start: min(time.Duration(m.mod.Xgw_segment_t0(m.ctx, i))*10*time.Millisecond, end),
+				End:   min(time.Duration(m.mod.Xgw_segment_t1(m.ctx, i))*10*time.Millisecond, end),
 				Text:  m.str(m.mod.Xgw_segment_text(m.ctx, i)),
 			})
 		}
