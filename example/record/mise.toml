@@ -1,0 +1,32 @@
+[env]
+# whisper.go is 4 to 6 times faster with SIMD.
+GOEXPERIMENT = "simd"
+
+[tasks.download]
+description = "Download the model, and check its SHA-256"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+# fetch downloads $1 to $2 once, and checks that its SHA-256 is $3.
+fetch() {
+  if [[ ! -f $2 ]]; then
+    curl -fL --retry 3 -o "$2.part" "$1"
+    mv "$2.part" "$2"
+  fi
+  got=$( (sha256sum "$2" 2>/dev/null || shasum -a 256 "$2") | cut -d ' ' -f 1)
+  if [[ $got != "$3" ]]; then
+    echo "$2: SHA-256 is $got, want $3" >&2
+    rm -f "$2"
+    exit 1
+  fi
+}
+# base, multilingual: it detects the language, and knows 99 of them.
+fetch https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base-q5_1.bin \
+  ggml-base-q5_1.bin 422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898
+'''
+
+[tasks.record]
+description = "Record from the microphone until Enter, then transcribe"
+depends = ["download"]
+# usage "--lang <lang>" passes its flags on, such as: mise run record -- -lang ja
+run = "go run . {{arg(name='flags', var=true, default='')}}"

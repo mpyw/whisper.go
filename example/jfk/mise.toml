@@ -1,0 +1,32 @@
+[env]
+# whisper.go is 4 to 6 times faster with SIMD.
+GOEXPERIMENT = "simd"
+
+[tasks.download]
+description = "Download the model and jfk.wav, and check their SHA-256"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+# fetch downloads $1 to $2 once, and checks that its SHA-256 is $3.
+fetch() {
+  if [[ ! -f $2 ]]; then
+    curl -fL --retry 3 -o "$2.part" "$1"
+    mv "$2.part" "$2"
+  fi
+  got=$( (sha256sum "$2" 2>/dev/null || shasum -a 256 "$2") | cut -d ' ' -f 1)
+  if [[ $got != "$3" ]]; then
+    echo "$2: SHA-256 is $got, want $3" >&2
+    rm -f "$2"
+    exit 1
+  fi
+}
+fetch https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en-q5_1.bin \
+  ggml-tiny.en-q5_1.bin c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b
+fetch https://github.com/ggml-org/whisper.cpp/raw/d1be6fde11ac6e0407606b4e42fe72d34add8037/samples/jfk.wav \
+  jfk.wav 59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e
+'''
+
+[tasks.transcribe]
+description = "Transcribe jfk.wav"
+depends = ["download"]
+run = "go run ."

@@ -60,6 +60,19 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Each example is its own module, which the steps above skip.
+      - name: Vet the examples
+        shell: bash
+        run: for d in example/*/; do (cd "$d" && go vet ./...); done
+
+      - name: Run the jfk example
+        shell: bash
+        working-directory: example/jfk
+        run: |
+          out=$(go run . "$RUNNER_TEMP/whisper-model.bin" ../../testdata/jfk.wav)
+          echo "$out"
+          grep -q "ask not what your country can do for you" <<<"$out"
+
       - name: Test with coverage
         shell: bash
         run: ./coverage.sh

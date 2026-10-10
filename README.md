@@ -90,6 +90,13 @@ func main() {
 GOEXPERIMENT=simd go build .
 ```
 
+## Examples
+
+| Example | What it does |
+| --- | --- |
+| [`example/jfk`](example/jfk) | Transcribes a WAV file. `mise run transcribe` downloads everything it needs. |
+| [`example/record`](example/record) | Records from the microphone until Enter, then transcribes it, in any language |
+
 ## API
 
 Full documentation: [pkg.go.dev](https://pkg.go.dev/github.com/mpyw/whisper.go).
