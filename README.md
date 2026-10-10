@@ -105,7 +105,7 @@ whisper.cpp 1.9.5 with tiny.en, on `testdata/jfk.wav` (11 s of speech), on an Ap
 | A model takes about twice its size in memory | `New` copies the model into the module, which builds its tensors from the copy and keeps that memory. The 4 GiB limit holds models below about 2 GB. |
 | Audio takes about 6 bytes a sample | The samples and their mel spectrogram, 7 with large-v3's 128 mel bands. One call takes at most about 9 hours, and less with a large model. Longer audio returns `ErrTooLong`, and the model stays usable. Split it. |
 | Memory only grows | The module never gives memory back. A model keeps what its longest call took, until `Close`. |
-| A trap closes the model, and leaks it | `GGML_ABORT`, and the errors whisper.cpp threw, trap. The error wraps `ErrClosed`, and so does every call after. `Close` frees nothing then, since the module's threads may still be inside it. Those that spin end, and those that wait stay. |
+| A trap closes the model, and may leak it | `GGML_ABORT`, and the errors whisper.cpp threw, trap. The error wraps `ErrClosed`, and so does every call after. The memory goes once the module's threads have ended: those that spin end, and those that wait stay, and keep it. |
 | A trap on a worker thread ends the program | The thread that waits for it would wait forever. |
 | `Threads` above `GOMAXPROCS` | It is capped at `GOMAXPROCS`, and at 32. ggml's threads spin while they wait for each other, so a busy CPU slows every thread. |
 | No GPU | whisper.cpp runs on its CPU backend only |

@@ -10,8 +10,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -411,5 +413,56 @@ func BenchmarkTranscribe(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// TestNewTrapFreesMemory loads a model whose first word claims 2 GiB, which
+// traps in gw_init. The memory of the model must not stay.
+func TestNewTrapFreesMemory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("it reads the RSS with ps")
+	}
+	b := testModel(t)
+	d := append([]byte(nil), b...)
+	// The magic and 11 hparams, the filters' sizes and values, the vocab size.
+	nMel, nFFT := binary.LittleEndian.Uint32(d[48:]), binary.LittleEndian.Uint32(d[52:])
+	binary.LittleEndian.PutUint32(d[56+4*nMel*nFFT+4:], 0x7fffffff)
+	before := testRSS(t)
+	for range 4 {
+		if _, err := whisper.New(d, &whisper.Options{Log: io.Discard}); !errors.Is(err, whisper.ErrClosed) {
+			t.Fatalf("err = %v, want a trap", err)
+		}
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		grew := testRSS(t) - before
+		if grew < 512<<20 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the RSS grew %d MiB over 4 models that trapped", grew>>20)
+		}
+	}
+}
+
+// testRSS is the process's resident set, in bytes.
+func testRSS(t *testing.T) int {
+	t.Helper()
+	out, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(os.Getpid())).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kb << 10
+}
+
+// TestTranscribeLanguageNUL passes a language with a NUL inside. The module
+// read it up to the NUL, as "en", and returned "en" for it.
+func TestTranscribeLanguageNUL(t *testing.T) {
+	m := testNew(t)
+	if _, err := m.Transcribe(context.Background(), make([]float32, whisper.SampleRate), &whisper.TranscribeOptions{Language: "en\x00xx"}); err == nil {
+		t.Error("Transcribe accepted a language with a NUL")
 	}
 }

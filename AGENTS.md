@@ -48,7 +48,7 @@ The tests download a 32 MB model once, into the user cache directory. `WHISPER_T
 | A slice as long as the committed pages | `Grow` changed the slice's length while threads read the slice: `go test -race` failed on every run. The slice spans the reservation from the start, and the committed pages are counted apart. A touch beyond them faults, and `debug.SetPanicOnFault` makes that a panic. |
 | Addresses as `int32` in the host | The module passes them as i32, so one at 2 GiB or above was negative and panicked. `host.MemoryAddr` reads them as unsigned. |
 | Checking `ctx.Err()` only when `gw_full` fails | A cancel before a pass of the encoder makes whisper.cpp stop with success, and `Transcribe` returned part of the result with no error. `ctx.Err()` decides first. |
-| Freeing a trapped model's memory in `Close` | The trap may leave threads spinning in the module, which would fault on freed pages. A trapped model leaks instead. |
+| Freeing a trapped model's memory in `Close` | The trap may leave threads in the module, which would fault on freed pages, and `Close` would wait for them. A goroutine frees it once they end instead: `Stop` ends those that spin, and one that waits for good keeps it. |
 | Recovering a trap on a worker thread | The thread that started the graph waits for it at a barrier, so recovering would hang the run. The program ends instead. |
 | `SetContext(nil)` to stop watching a context | staticcheck rejects a nil Context. `Transcribe` restores `context.Background()` instead. |
 | The portable `simd` package | It has no widening and no sum across lanes, which float16 and int8 need. `simd/archsimd` has both, one file per architecture. |

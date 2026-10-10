@@ -14,6 +14,7 @@ import (
 	"math"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	whisperwasm "github.com/mpyw/whisper.go-wasm"
@@ -60,7 +61,8 @@ type Options struct {
 
 // TranscribeOptions configures one Transcribe call.
 type TranscribeOptions struct {
-	// Language is a code such as "en" or "ja". Empty, or "auto", detects it
+	// Language is a code such as "en" or "ja", or a lowercase name such as
+	// "japanese". Empty, or "auto", detects it
 	// with a multilingual model. An English-only model transcribes English
 	// whatever it says.
 	Language string
@@ -73,7 +75,7 @@ type TranscribeOptions struct {
 
 // Result is a transcription.
 type Result struct {
-	// Language is the language transcribed, as given or detected.
+	// Language is the code of the language transcribed, given or detected.
 	Language string
 	Segments []Segment
 }
@@ -124,8 +126,7 @@ func New(model []byte, opts *Options) (_ *Model, err error) {
 		m.mod.Xgw_free(p)
 	})
 	if err != nil {
-		// A trap leaves the memory to the threads it may have left
-		// running: see Close.
+		// The trap frees the memory itself: see call.
 		return nil, err
 	}
 	if m.ctx == 0 {
@@ -148,6 +149,10 @@ func (m *Model) Transcribe(ctx context.Context, pcm []float32, opts *TranscribeO
 	}
 	if opts == nil {
 		opts = &TranscribeOptions{}
+	}
+	// The module reads the language up to a NUL, so "en\x00xx" was "en".
+	if strings.IndexByte(opts.Language, 0) >= 0 {
+		return nil, fmt.Errorf("whisper: unknown language %q", opts.Language)
 	}
 	threads := min(runtime.GOMAXPROCS(0), maxThreads)
 	if opts.Threads > 0 {
@@ -228,8 +233,8 @@ func (m *Model) Transcribe(ctx context.Context, pcm []float32, opts *TranscribeO
 
 // Close frees the model and its memory. Calls after it return ErrClosed.
 //
-// After a trap, Close frees nothing. The trap may have left threads
-// waiting in the module, which would touch the memory once it is freed.
+// After a trap, Close frees nothing: the memory goes once the threads the
+// trap left in the module have ended, which one waiting for good never does.
 func (m *Model) Close() error {
 	m.sem <- struct{}{}
 	defer func() { <-m.sem }()
@@ -259,6 +264,13 @@ func (m *Model) call(f func()) (err error) {
 		if r := recover(); r != nil {
 			m.mod = nil
 			m.wasi.Stop()
+			// The memory goes once every thread has ended. Only this
+			// goroutine starts threads, so none starts after. One that
+			// waits in the module for good keeps the memory, as before.
+			go func() {
+				m.threads.Wait()
+				_ = m.mem.Close() // nothing is left to report the error to
+			}()
 			err = fmt.Errorf("%w: the model trapped: %v", ErrClosed, r)
 		}
 	}()
