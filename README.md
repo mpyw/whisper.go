@@ -18,6 +18,8 @@ It needs no cgo and no Wasm runtime: `go build` is enough.
 > [!WARNING]
 > This is an experiment. The API may change.
 
+whisper.go is a library. For a command-line tool, use whisper.cpp's own `whisper-cli`: it reads audio files, and can use a GPU.
+
 ## Quick start
 
 **1. Install.**
@@ -32,7 +34,7 @@ go get github.com/mpyw/whisper.go
 curl -LO https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 
-**3. Convert the audio.** whisper.go reads samples, not audio files. Make them 16 kHz, mono, 32-bit float:
+**3. Convert the audio.** whisper.go takes samples, not audio files, as whisper.cpp's library does. Make them 16 kHz, mono, 32-bit float:
 
 ```sh
 ffmpeg -i speech.mp3 -ar 16000 -ac 1 -f f32le speech.raw
