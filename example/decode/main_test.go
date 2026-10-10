@@ -101,20 +101,22 @@ func TestDecodeResample(t *testing.T) {
 	}
 }
 
-// TestDecodeMix decodes a stereo WAV with a sine on the left only: the mono
-// is their mean, half the sine.
+// TestDecodeMix decodes a stereo WAV with a sine on the left only, at a rate
+// for each of to16k's paths: the mono is their mean, half the sine.
 func TestDecodeMix(t *testing.T) {
-	pcm, err := decode(writeWAV(t, 44100, 2, 0, func(c int, t float64) float64 {
-		if c == 1 {
-			return 0
+	for _, rate := range []int{8000, 16000, 44100} {
+		pcm, err := decode(writeWAV(t, rate, 2, 0, func(c int, t float64) float64 {
+			if c == 1 {
+				return 0
+			}
+			return sine(1000)(c, t)
+		}))
+		if err != nil {
+			t.Fatal(err)
 		}
-		return sine(1000)(c, t)
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := rms(pcm), 0.25/math.Sqrt2; math.Abs(got-want) > 0.01*want {
-		t.Errorf("RMS %.4f, want %.4f", got, want)
+		if got, want := rms(pcm), 0.25/math.Sqrt2; math.Abs(got-want) > 0.01*want {
+			t.Errorf("%d Hz: RMS %.4f, want %.4f", rate, got, want)
+		}
 	}
 }
 
