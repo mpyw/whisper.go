@@ -160,7 +160,7 @@ Each call is independent: the text of one call does not affect the next.
 
 ### `(*Model).Close() error`
 
-Frees the model and its memory. It waits for the call in progress. Calling it again returns nil.
+Frees the model and its memory. It waits for the call in progress. Calls that were waiting for the model return `ErrClosed`, and so do calls after it. Calling it again returns nil.
 
 ### Errors
 
@@ -205,7 +205,7 @@ whisper.go runs matrix products, softmax and quantization in Go with SIMD. The r
 | Limit | Details |
 | --- | --- |
 | 64-bit Unix and Windows only | Each model reserves 4 GiB of address space up front, so its memory never moves while threads read it. On other platforms, `New` fails. |
-| Models below about 2 GB | A model takes about twice its size in memory: `New` copies it in, and whisper.cpp builds its tensors from the copy. All of it must fit in 4 GiB. |
+| Models below about 2 GB | A model takes about twice its size in memory, and more for whisper.cpp's state: `New` copies it in, and whisper.cpp builds its tensors from the copy. The 32 MB tiny.en-q5_1 took 106 MB, and the 78 MB tiny.en 194 MB. An 11 s call with 8 threads added about 80 MB. All of it must fit in 4 GiB. |
 | About 6 bytes of memory a sample | For the samples and their mel spectrogram, and 7 with large-v3. Longer audio returns `ErrTooLong`. |
 | Memory only grows | A model keeps the memory its longest call took, until `Close`. |
 | A trap closes the model | whisper.cpp's aborts and errors trap. The error wraps `ErrClosed`, and so does every call after. The memory is freed once the model's threads end. A thread that waits for good keeps it. |

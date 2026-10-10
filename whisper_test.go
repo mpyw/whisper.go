@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -512,6 +513,55 @@ func TestTranscribeWithinAudio(t *testing.T) {
 			if s.Start > cut || s.End > cut {
 				t.Errorf("%v of audio: segment %+v ends after it", cut, s)
 			}
+		}
+	}
+}
+
+// TestTranscribeTooLongForInt32 passes more samples than the module's int32
+// sizes hold, about 9.3 hours. Transcribe refuses them before the module
+// sees them. The slice is never written, so it takes no memory.
+func TestTranscribeTooLongForInt32(t *testing.T) {
+	m := testNew(t)
+	if _, err := m.Transcribe(context.Background(), make([]float32, math.MaxInt32/4+1), nil); !errors.Is(err, whisper.ErrTooLong) {
+		t.Errorf("err = %v, want ErrTooLong", err)
+	}
+}
+
+// TestCloseWhileWaiting closes a model while calls wait for it. Close waits
+// for the one in progress only: the waiting calls return ErrClosed. They
+// ran first before, and Close behind 6 calls of 0.7 s took 4.2 s.
+func TestCloseWhileWaiting(t *testing.T) {
+	m, err := whisper.New(testModel(t), &whisper.Options{Log: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pcm := testWAV(t, "testdata/jfk.wav")
+	started := make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		// One thread takes over a second, so the others wait.
+		ctx := &testStarted{Context: context.Background(), started: started}
+		_, err := m.Transcribe(ctx, pcm, &whisper.TranscribeOptions{Threads: 1})
+		first <- err
+	}()
+	<-started
+	waiting := make(chan error, 4)
+	for range cap(waiting) {
+		go func() {
+			_, err := m.Transcribe(context.Background(), pcm, nil)
+			waiting <- err
+		}()
+	}
+	time.Sleep(100 * time.Millisecond) // let them wait for the model
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-first; err != nil {
+		t.Errorf("the call in progress: %v", err)
+	}
+	for range cap(waiting) {
+		if err := <-waiting; !errors.Is(err, whisper.ErrClosed) {
+			t.Errorf("a waiting call: err = %v, want ErrClosed", err)
 		}
 	}
 }

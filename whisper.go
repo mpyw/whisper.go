@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	whisperwasm "github.com/mpyw/whisper.go-wasm"
@@ -91,7 +92,10 @@ type Segment struct {
 // goroutine. Calls to Transcribe run one at a time, and Close waits for the
 // one in progress.
 type Model struct {
-	sem     chan struct{} // holds one value while a call runs
+	sem chan struct{} // holds one value while a call runs
+	// closing is set once Close begins. The calls that waited for the model
+	// return ErrClosed then, rather than run before Close.
+	closing atomic.Bool
 	mem     *host.Memory
 	env     *host.Env
 	threads *host.Threads
@@ -138,8 +142,8 @@ func New(model []byte, opts *Options) (_ *Model, err error) {
 
 // Transcribe transcribes pcm, mono samples at SampleRate in [-1, 1].
 // Samples outside are clipped, and NaN reads as 0. No samples give an
-// empty Result, with no language, whatever opts says. Under 100 ms give no
-// segments, and no language if it was to be detected.
+// empty Result, with no language, whatever opts says. Under 1640 samples,
+// about 100 ms, give no segments, and no language if it was to be detected.
 // Canceling ctx stops the run within one of ggml's operations, and its
 // error is the result.
 func (m *Model) Transcribe(ctx context.Context, pcm []float32, opts *TranscribeOptions) (*Result, error) {
@@ -168,7 +172,7 @@ func (m *Model) Transcribe(ctx context.Context, pcm []float32, opts *TranscribeO
 		return nil, ctx.Err()
 	}
 	defer func() { <-m.sem }()
-	if m.mod == nil {
+	if m.mod == nil || m.closing.Load() {
 		return nil, ErrClosed
 	}
 	// ctx may have ended while this call waited for the one before.
@@ -236,11 +240,14 @@ func (m *Model) Transcribe(ctx context.Context, pcm []float32, opts *TranscribeO
 	return &res, nil
 }
 
-// Close frees the model and its memory. Calls after it return ErrClosed.
+// Close frees the model and its memory. It waits for the call in progress.
+// The calls that wait for the model, and those after Close, return
+// ErrClosed. Close again returns nil.
 //
 // After a trap, Close frees nothing: the memory goes once the threads the
 // trap left in the module have ended, which one waiting for good never does.
 func (m *Model) Close() error {
+	m.closing.Store(true)
 	m.sem <- struct{}{}
 	defer func() { <-m.sem }()
 	if m.mod == nil {
