@@ -416,6 +416,22 @@ func BenchmarkTranscribe(b *testing.B) {
 	}
 }
 
+// TestNewTruncated loads a model cut short. whisper.cpp took a file with no
+// tensors for an empty test model, and a tensor cut short as whole: New
+// succeeded, and the first Transcribe trapped or transcribed garbage.
+func TestNewTruncated(t *testing.T) {
+	b := testModel(t)
+	for _, n := range []int{4, 1000, 100_000, len(b) - 1000, len(b) - 1} {
+		m, err := whisper.New(b[:n], &whisper.Options{Log: io.Discard})
+		if err == nil {
+			_ = m.Close() // the test failed already
+			t.Errorf("New accepted the first %d of %d bytes", n, len(b))
+		} else if errors.Is(err, whisper.ErrClosed) {
+			t.Errorf("the first %d bytes trapped: %v", n, err)
+		}
+	}
+}
+
 // TestNewTrapFreesMemory loads a model whose first word claims 2 GiB, which
 // traps in gw_init. The memory of the model must not stay.
 func TestNewTrapFreesMemory(t *testing.T) {

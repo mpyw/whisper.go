@@ -13,6 +13,7 @@ Speech-to-text for Go, running whisper.cpp from whisper.go-wasm with no cgo. See
 - Every kernel in `internal/host` has a generic version in `kernel_generic.go`. The vector versions, `kernel_arm64.go` and `kernel_amd64.go`, build only with `GOEXPERIMENT=simd`. `kernel_nosimd.go` maps the names otherwise. `TestKernelHalf`, `TestKernelQuantized` and `TestKernelTile` compare the two.
 - In the vector code, keep accumulators in named variables, not arrays: the compiler sends an array of vectors through the stack. Load through array pointers, sliced once for several loads, so that each load has no bounds check.
 - Test the vector code on both architectures. An amd64 test binary runs under Docker's `--platform linux/amd64` on an arm64 Mac.
+- Release with the `Tag and Release` workflow: `gh workflow run tag_and_release.yml -f version=vX.Y.Z`. It tags main's head only once its tests passed, and never reuses a tag: Go caches a version forever.
 
 ## Skills
 
