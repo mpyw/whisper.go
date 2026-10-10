@@ -387,6 +387,16 @@ func (k *Kernels) Xgw_quantize_row(typ, x, y, n int32) {
 		for _, f := range xb {
 			amax = max(amax, float32(math.Abs(float64(f))))
 		}
+		if amax != amax {
+			// A NaN: ggml's MAX(amax, a) is amax > a ? amax : a, which
+			// replaces a NaN by the next value, where Go's max keeps it.
+			amax = 0
+			for _, f := range xb {
+				if a := float32(math.Abs(float64(f))); !(amax > a) {
+					amax = a
+				}
+			}
+		}
 		d := amax / 127
 		var id float32
 		if d != 0 {

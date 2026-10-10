@@ -55,3 +55,6 @@ The tests download a 32 MB model once, into the user cache directory. `WHISPER_T
 | `unsafe` to view the module's memory as `[]float32` | `archsimd.LoadUint8x16` and the `Reshape` methods read the bytes as vectors with no `unsafe`. |
 | A dot product per column of a tile | Each row of x was loaded once per column. 4 columns at a time load it once for 4, and keep 8 sums in flight. With q5_1 and 8 threads, 0.76 s became 0.64 s. |
 | A no-op `sched_yield` | It is 16% faster on an idle machine, but 5 times slower with 2 busy goroutines: Go preempts a spinning goroutine only every 10 ms. The time in `pthread_cond_signal` was `Gosched` waking another thread, so ggml yields only once every 4096 spins (whisper.go-wasm's `patches/0001`). |
+| Reading F16's float32 columns from the module's memory in place | `kernelFloatRow` copies them to a scratch row first, for 2.7% of the time. Without the copy, q5_1 took 1.2% longer with 1 thread and 18% with 8. |
+| float16 to float32 by arithmetic, in place of the `kernelHalf` table | With 1 thread, q5_1 took 3.1% longer, and q8_0 2.1%. |
+| Returning vectors from `kernelDotF32x2x4` and storing the two rows in pairs | With 1 thread it was 1% slower, and with 8 threads up to 3% faster: no clear gain. |

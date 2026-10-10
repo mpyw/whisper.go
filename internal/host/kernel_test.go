@@ -592,3 +592,33 @@ func TestKernelQuantizeRow(t *testing.T) {
 		}
 	}
 }
+
+// TestKernelQuantizeRowNaN checks a block with a NaN against ggml's
+// quantize_row_q8_0_ref, whose MAX(a, b) is a > b ? a : b: the values
+// after the NaN set amax, and d stays finite.
+func TestKernelQuantizeRowNaN(t *testing.T) {
+	mem, err := NewMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := mem.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	k := newKernels(mem)
+	b := mem.Bytes()
+	const x, y = 0x1000, 0x2000
+	for j := range 32 {
+		f := float32(j+1) / 8
+		if j == 3 {
+			f = float32(math.NaN())
+		}
+		binary.LittleEndian.PutUint32(b[x+4*j:], math.Float32bits(f))
+	}
+	k.Xgw_quantize_row(kernelTypeQ8_0, x, y, 32)
+	// amax is 32/8 = 4, the largest value after the NaN.
+	if got, want := kernelHalfAt(b[y:]), kernelHalf[kernelHalfOf(4.0/127)]; got != want {
+		t.Errorf("d = %v, want %v", got, want)
+	}
+}

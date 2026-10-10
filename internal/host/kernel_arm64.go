@@ -234,7 +234,8 @@ func kernelDotQx4(q []byte, dm []float32, cols [4][]byte, yd, ys []float32, q8_1
 
 // kernelSum32Narrow sums the 32 products of x (x0, x1 and their high
 // halves) and b into 8 int16 lanes, 4 products a lane. It is exact while
-// |x| <= 32: 4 products of at most 32*128 fit in int16, and so do 8.
+// |x| <= 31, as in q5_1, the widest of the narrow types: 8 products of at
+// most 31*128 fit in int16.
 func kernelSum32Narrow(x0, x0h, x1, x1h archsimd.Int8x16, b *[32]byte) archsimd.Int16x8 {
 	y0, y1 := kernelLoadInt8(b[0:16]), kernelLoadInt8(b[16:32])
 	return x0.MulWidenLo(y0).Add(x0h.MulWidenLo(y0.HiToLo())).Add(x1.MulWidenLo(y1).Add(x1h.MulWidenLo(y1.HiToLo())))
