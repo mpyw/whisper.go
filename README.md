@@ -18,6 +18,18 @@ It needs no cgo and no Wasm runtime: `go build` is enough.
 > [!WARNING]
 > This is an experiment. The API may change.
 
+> [!IMPORTANT]
+> whisper.go takes **raw samples** only. It reads no audio files: decode them first, such as with ffmpeg.
+>
+> | Input | Supported | Notes |
+> | --- | --- | --- |
+> | Samples as `[]float32` | Yes | In [-1, 1]. For 16-bit integers, divide by 32768. |
+> | 16 kHz (`whisper.SampleRate`) | Yes, only this | No resampling. Other rates give wrong text, not an error. |
+> | Mono | Yes, only this | No downmixing. Mix stereo to one channel first. |
+> | WAV, MP3, FLAC and other files | No | `ffmpeg -i in.mp3 -ar 16000 -ac 1 -f f32le out.raw` writes the samples. |
+> | whisper.cpp models, ggml format (`ggml-*.bin`) | Yes | f16, q8_0, q5_1, q5_0, q4_1 and q4_0 run in Go with SIMD. Other types run without it. |
+> | OpenAI's `.pt`, Hugging Face's safetensors, GGUF | No | Convert with whisper.cpp's `models/convert-*.py`, or download its ggml models. |
+
 whisper.go is a library. For a command-line tool, use whisper.cpp's own `whisper-cli`: it reads audio files, and can use a GPU.
 
 ## Quick start
