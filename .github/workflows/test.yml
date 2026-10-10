@@ -41,11 +41,21 @@ jobs:
       - uses: jdx/mise-action@v4
 
       # The tests' model, 32 MB from Hugging Face. The key is its digest,
-      # testModelSHA256 in whisper_test.go: change both together.
+      # testModelSHA256 in whisper_test.go, and the URL its testModelURL:
+      # change them together. The tests read WHISPER_TEST_MODEL as it is.
       - uses: actions/cache@v6
+        id: model
         with:
           path: ${{ runner.temp }}/whisper-model.bin
           key: whisper-model-c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b
+
+      - name: Download the model
+        if: steps.model.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/whisper-model.bin" https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en-q5_1.bin
+          sum="$( (command -v sha256sum > /dev/null && sha256sum || shasum -a 256) < "$RUNNER_TEMP/whisper-model.bin" | cut -d' ' -f1)"
+          [ "$sum" = c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b ] || { echo "SHA-256 $sum" >&2; exit 1; }
 
       - name: Vet
         run: go vet ./...
