@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -144,6 +145,18 @@ func TestTranscribe(t *testing.T) {
 	}
 	if end < 10*time.Second || end > 11*time.Second {
 		t.Errorf("the last segment ends at %v, want about 11 s", end)
+	}
+	// The pinned model gives exactly this, with or without SIMD, on arm64
+	// and amd64, on any number of threads.
+	if testDigest(testModel(t)) != testModelSHA256 {
+		return
+	}
+	wantSegments := []whisper.Segment{
+		{Start: 0, End: 7740 * time.Millisecond, Text: " And so my fellow Americans ask not what your country can do for you"},
+		{Start: 7740 * time.Millisecond, End: 10580 * time.Millisecond, Text: " ask what you can do for your country."},
+	}
+	if !slices.Equal(res.Segments, wantSegments) {
+		t.Errorf("segments = %q, want %q", res.Segments, wantSegments)
 	}
 }
 

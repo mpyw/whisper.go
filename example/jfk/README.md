@@ -1,6 +1,6 @@
 # Example: transcribe a WAV file
 
-Transcribes `jfk.wav`, whisper.cpp's sample: 11 s of a speech by John F. Kennedy.
+Transcribes [`testdata/jfk.wav`](../../testdata/jfk.wav), whisper.cpp's sample: 11 s of a speech by John F. Kennedy.
 
 ## Run
 
@@ -19,7 +19,7 @@ mise run transcribe
 
 | Task | What it does |
 | --- | --- |
-| `mise run download` | Downloads the model (`ggml-tiny.en-q5_1.bin`, 32 MB) and `jfk.wav` once, and checks their SHA-256 |
+| `mise run download` | Downloads the model (`ggml-tiny.en-q5_1.bin`, 32 MB) once, and checks its SHA-256 |
 | `mise run transcribe` | Runs `download`, then `go run .` |
 
 `mise.toml` sets `GOEXPERIMENT=simd`, which makes whisper.go 4 to 6 times faster.

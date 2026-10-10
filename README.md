@@ -94,7 +94,7 @@ GOEXPERIMENT=simd go build .
 
 | Example | What it does |
 | --- | --- |
-| [`example/jfk`](example/jfk) | Transcribes a WAV file. `mise run transcribe` downloads everything it needs. |
+| [`example/jfk`](example/jfk) | Transcribes a WAV file. `mise run transcribe` downloads the model, and runs it. |
 | [`example/record`](example/record) | Records from the microphone until Enter, then transcribes it, in any language |
 
 ## API

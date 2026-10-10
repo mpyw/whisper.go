@@ -1,11 +1,11 @@
-// Command jfk transcribes jfk.wav, a sample of whisper.cpp: 11 s of a
-// speech by John F. Kennedy.
+// Command jfk transcribes testdata/jfk.wav, a sample of whisper.cpp: 11 s
+// of a speech by John F. Kennedy.
 //
 //	mise run transcribe
 //
 // The model and the WAV file may be given as arguments too:
 //
-//	go run . ggml-tiny.en-q5_1.bin jfk.wav
+//	go run . ggml-tiny.en-q5_1.bin ../../testdata/jfk.wav
 package main
 
 import (
@@ -21,7 +21,7 @@ import (
 )
 
 func main() {
-	modelPath, wavPath := "ggml-tiny.en-q5_1.bin", "jfk.wav"
+	modelPath, wavPath := "ggml-tiny.en-q5_1.bin", "../../testdata/jfk.wav"
 	if len(os.Args) == 3 {
 		modelPath, wavPath = os.Args[1], os.Args[2]
 	}

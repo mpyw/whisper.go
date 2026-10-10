@@ -52,7 +52,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Fprintf(os.Stderr, "Recorded %v. Transcribing...\n", (time.Duration(len(pcm))*time.Second/whisper.SampleRate).Round(10*time.Millisecond))
+	fmt.Fprintf(os.Stderr, "Recorded %v. Transcribing...\n", (time.Duration(len(pcm)) * time.Second / whisper.SampleRate).Round(10*time.Millisecond))
 
 	res, err := m.Transcribe(context.Background(), pcm, &whisper.TranscribeOptions{Language: *lang})
 	if err != nil {
