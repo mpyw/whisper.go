@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src=".github/assets/icon.png" width="200" alt="A Go gopher cupping a paw to its ear, listening to sound waves">
+
 # whisper.go
 
 Transcribe speech from Go with [whisper.cpp](https://github.com/ggml-org/whisper.cpp), with no cgo.
@@ -98,3 +100,5 @@ Their licenses are in `whisperwasm.Licenses`, and in [whisper.go-wasm's licenses
 Whoever distributes such a program must pass them on.
 
 `testdata/jfk.wav` comes from whisper.cpp's samples, under its MIT License.
+
+The mascot is the Go gopher, designed by Renée French, under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
