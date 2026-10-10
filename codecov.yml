@@ -1,0 +1,24 @@
+codecov:
+  require_ci_to_pass: true
+  # One upload for each OS, with and without GOEXPERIMENT=simd: the status
+  # waits for all six, as the vector kernels of each CPU, and the code of
+  # each OS, are reached only there.
+  notify:
+    after_n_builds: 6
+
+coverage:
+  precision: 1
+  round: down
+  status:
+    # The whole may not get worse, by any amount.
+    project:
+      default:
+        target: auto
+        threshold: 0%
+    # New and changed lines must be tested.
+    patch:
+      default:
+        target: 90%
+
+comment:
+  require_changes: true

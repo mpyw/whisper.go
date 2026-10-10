@@ -19,8 +19,18 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
+        # The vector kernels build only with GOEXPERIMENT=simd.
+        experiment: ["", simd]
     runs-on: ${{ matrix.os }}
+    env:
+      GOEXPERIMENT: ${{ matrix.experiment }}
     timeout-minutes: 45
+    # id-token: write lets the Codecov upload authenticate as this run,
+    # with no stored token. A job's permissions replace the workflow's, so
+    # contents: read is restated.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -30,18 +40,37 @@ jobs:
 
       - uses: jdx/mise-action@v4
 
-      # The tests' model, 32 MB from Hugging Face. Its digest is in the
-      # test, which never changes it without changing the key.
+      # The tests' model, 32 MB from Hugging Face. The key is its digest,
+      # testModelSHA256 in whisper_test.go: change both together.
       - uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/whisper-model.bin
-          key: whisper-model-${{ hashFiles('whisper_test.go') }}
+          key: whisper-model-c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b
 
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test ./...
+      - name: Test with coverage
+        shell: bash
+        run: ./coverage.sh
+        env:
+          WHISPER_TEST_MODEL: ${{ runner.temp }}/whisper-model.bin
+
+      # Codecov merges the six uploads of a commit. The flag tells them
+      # apart. Codecov being unreachable is no reason to fail the run.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage.txt
+          flags: ${{ runner.os }}-${{ matrix.experiment || 'nosimd' }}
+          use_oidc: true
+        continue-on-error: true
+
+      # The module's threads share its memory with the host. Linux is
+      # enough to find a race.
+      - name: Test with the race detector
+        if: matrix.os == 'ubuntu-24.04'
+        run: go test -race -timeout 30m ./...
         env:
           WHISPER_TEST_MODEL: ${{ runner.temp }}/whisper-model.bin
 

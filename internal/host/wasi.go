@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	whisperwasm "github.com/mpyw/whisper.go-wasm"
@@ -26,6 +27,8 @@ type WASI struct {
 	mem   *Memory
 	log   io.Writer
 	start time.Time
+	// stopped ends a thread at its next sched_yield: see Stop.
+	stopped atomic.Bool
 }
 
 // NewWASI returns WASI over mem, writing the log to log. Nil discards it.
@@ -51,7 +54,7 @@ func (w *WASI) Xclock_time_get(id int32, _ int64, out int32) int32 {
 	default:
 		return wasiInval
 	}
-	binary.LittleEndian.PutUint64(w.mem.Bytes()[out:], uint64(ns))
+	binary.LittleEndian.PutUint64(w.mem.Bytes()[MemoryAddr(out):], uint64(ns))
 	return wasiSuccess
 }
 
@@ -61,8 +64,8 @@ func (w *WASI) Xenviron_get(_, _ int32) int32 { return wasiSuccess }
 // Xenviron_sizes_get reports an empty environment.
 func (w *WASI) Xenviron_sizes_get(count, size int32) int32 {
 	b := w.mem.Bytes()
-	binary.LittleEndian.PutUint32(b[count:], 0)
-	binary.LittleEndian.PutUint32(b[size:], 0)
+	binary.LittleEndian.PutUint32(b[MemoryAddr(count):], 0)
+	binary.LittleEndian.PutUint32(b[MemoryAddr(size):], 0)
 	return wasiSuccess
 }
 
@@ -79,7 +82,7 @@ func (w *WASI) Xfd_fdstat_get(fd, out int32) int32 {
 	if fd < 0 || fd > 2 {
 		return wasiBadf
 	}
-	b := w.mem.Bytes()[out : out+24]
+	b := w.mem.Bytes()[MemoryAddr(out):][:24]
 	clear(b)
 	b[0] = 2 // filetype: character_device
 	binary.LittleEndian.PutUint64(b[8:], ^uint64(0))
@@ -107,17 +110,18 @@ func (w *WASI) Xfd_write(fd, iovs, n, written int32) int32 {
 		return wasiBadf
 	}
 	b := w.mem.Bytes()
+	iov := MemoryAddr(iovs)
 	var total uint32
-	for i := range n {
-		p := binary.LittleEndian.Uint32(b[iovs+8*i:])
-		l := binary.LittleEndian.Uint32(b[iovs+8*i+4:])
+	for i := range int(n) {
+		p := int(binary.LittleEndian.Uint32(b[iov+8*i:]))
+		l := binary.LittleEndian.Uint32(b[iov+8*i+4:])
 		if w.log != nil {
 			// A log the caller cannot write is no reason to fail the run.
-			_, _ = w.log.Write(b[p : p+l])
+			_, _ = w.log.Write(b[p : p+int(l)])
 		}
 		total += l
 	}
-	binary.LittleEndian.PutUint32(b[written:], total)
+	binary.LittleEndian.PutUint32(b[MemoryAddr(written):], total)
 	return wasiSuccess
 }
 
@@ -131,8 +135,15 @@ func (w *WASI) Xproc_exit(code int32) { panic(WASIExit(code)) }
 
 // Xsched_yield yields the goroutine: ggml spins on it while it waits.
 func (w *WASI) Xsched_yield() int32 {
+	if w.stopped.Load() {
+		runtime.Goexit()
+	}
 	runtime.Gosched()
 	return wasiSuccess
 }
 
 var _ whisperwasm.Xwasi_snapshot_preview1 = (*WASI)(nil)
+
+// Stop makes every thread that spins in sched_yield end, after a trap left
+// it waiting for a thread that will never come.
+func (w *WASI) Stop() { w.stopped.Store(true) }

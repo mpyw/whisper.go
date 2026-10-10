@@ -40,6 +40,7 @@ whisper.go-wasm's ABI.md is the contract. `internal/host` implements every impor
 | Import module | Implemented by |
 | --- | --- |
 | `env`: the memory and `gw_aborted` | `memory.go`, `env.go` |
+| `env`: `gw_mul_mat_tile`, `gw_quantize_row` and `gw_soft_max` | `kernel.go`, with the kernels of `kernel_generic.go`, `kernel_arm64.go` and `kernel_amd64.go` |
 | `wasi_snapshot_preview1` | `wasi.go` |
 | `wasi`: `thread-spawn` | `thread.go` |
 

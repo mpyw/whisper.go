@@ -1,2 +1,6 @@
 # IDE
 /.idea/
+
+# Coverage profiles, written by coverage.sh
+/coverage.txt
+/coverage-raw.txt
