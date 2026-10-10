@@ -39,6 +39,38 @@ It needs no cgo and no Wasm runtime: `go build` is enough.
 > | Other ggml types | Yes, without SIMD | They run in the module, as whisper.cpp's own C code. |
 > | OpenAI's `.pt`, Hugging Face's safetensors, GGUF | No | Convert them with whisper.cpp's `models/convert-*.py`. |
 
+> [!TIP]
+> **Decoding audio in Go.** Pick by what you have:
+>
+> | Your audio | How | Example |
+> | --- | --- | --- |
+> | WAV of 16-bit PCM, mono, at 16 kHz | The standard library: read the `data` chunk, and divide each sample by 32768. | [`example/jfk`](example/jfk) |
+> | WAV of 8, 16 or 24-bit PCM, MP3, FLAC or Ogg Vorbis, at any rate, mono or stereo | [beep](https://github.com/gopxl/beep) (MIT), in pure Go: decode, `beep.Resample` to 16 kHz, and average the two channels. | [`example/decode`](example/decode) |
+> | Anything else: AAC, Opus, video, WAV of 32-bit or float PCM | [ffmpeg](https://ffmpeg.org), not Go: `ffmpeg -i in.m4a -ar 16000 -ac 1 -f f32le out.raw` | |
+>
+> With beep:
+>
+> ```go
+> s, format, err := mp3.Decode(f) // or wav, flac, vorbis
+> if err != nil {
+> 	return nil, err
+> }
+> defer s.Close()
+> r := beep.Resample(4, format.SampleRate, whisper.SampleRate, s)
+> var pcm []float32
+> buf := make([][2]float64, 4096)
+> for {
+> 	n, ok := r.Stream(buf)
+> 	for _, frame := range buf[:n] {
+> 		pcm = append(pcm, float32((frame[0]+frame[1])/2)) // beep gives mono in both channels
+> 	}
+> 	if !ok {
+> 		break
+> 	}
+> }
+> return pcm, r.Err()
+> ```
+
 whisper.go is a library. For a command-line tool, use whisper.cpp's own `whisper-cli`: it reads audio files, and can use a GPU.
 
 ## Quick start
@@ -118,6 +150,7 @@ GOEXPERIMENT=simd go build .
 | Example | What it does |
 | --- | --- |
 | [`example/jfk`](example/jfk) | Transcribes a WAV file. `mise run transcribe` downloads the model, and runs it. |
+| [`example/decode`](example/decode) | Transcribes a WAV, MP3, FLAC or Ogg Vorbis file, at any rate, decoded in pure Go |
 | [`example/record`](example/record) | Records from the microphone until Enter, then transcribes it, in any language |
 
 ## API
@@ -160,7 +193,7 @@ Transcribes `pcm`. `opts` may be nil.
 | --- | --- |
 | `Language string` | The language code, given or detected |
 | `Segments []Segment` | The text, in order |
-| `Segment.Start`, `Segment.End` | `time.Duration` from the start of `pcm`, in steps of 10 ms. Never past the end of `pcm`. |
+| `Segment.Start`, `Segment.End` | `time.Duration` from the start of `pcm`, in steps of 10 ms. Never past the end of `pcm`: a time past it is the end itself. |
 | `Segment.Text` | The text of the segment |
 
 Each call is independent: the text of one call does not affect the next.
@@ -181,7 +214,7 @@ Frees the model and its memory. It waits for the call in progress. Calls that we
 | `ErrClosed` | The model was closed | Closed |
 | An error that wraps `ErrClosed` | whisper.cpp trapped (aborted) | Closed. See [Limitations](#limitations). |
 | `whisper: cannot load the model` | `New` got bytes that are not a model, or a model cut short | None. See `Options.Log`. |
-| `whisper: the model is larger than the module's memory` | The model is over 4 GiB | None |
+| `whisper: the model is larger than the module's memory` | The model is 2 GiB or over | None |
 
 ### Concurrency
 
@@ -192,7 +225,7 @@ To transcribe in parallel, load the model once per goroutine.
 
 > [!TIP]
 > Build with `GOEXPERIMENT=simd`. Then whisper.go uses NEON on arm64, and AVX2 and FMA on amd64, for ggml's heaviest work.
-> Without it, or on other CPUs, the same code runs without SIMD, 4.3 to 5.9 times slower.
+> Without it, or on other CPUs, the same code runs without SIMD, 4.3 to 6.0 times slower.
 > `GOEXPERIMENT=simd` is experimental in Go 1.27, and its API may change.
 
 Time to transcribe `testdata/jfk.wav` (11 s of speech) with whisper.cpp 1.9.5 and tiny.en, on an Apple M2 Pro:

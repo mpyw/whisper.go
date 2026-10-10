@@ -61,9 +61,9 @@ jobs:
         run: go vet ./...
 
       # Each example is its own module, which the steps above skip.
-      - name: Vet the examples
+      - name: Vet and test the examples
         shell: bash
-        run: for d in example/*/; do (cd "$d" && go vet ./...); done
+        run: for d in example/*/; do (cd "$d" && go vet ./... && go test ./...); done
 
       - name: Run the jfk example
         shell: bash

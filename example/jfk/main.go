@@ -22,8 +22,12 @@ import (
 
 func main() {
 	modelPath, wavPath := "ggml-tiny.en-q5_1.bin", "../../testdata/jfk.wav"
-	if len(os.Args) == 3 {
+	switch len(os.Args) {
+	case 1:
+	case 3:
 		modelPath, wavPath = os.Args[1], os.Args[2]
+	default:
+		log.Fatal("usage: go run . [model.bin audio.wav]")
 	}
 
 	model, err := os.ReadFile(modelPath)
@@ -67,7 +71,12 @@ func readWAV(b []byte) ([]float32, error) {
 		id, size := string(b[0:4]), int(binary.LittleEndian.Uint32(b[4:8]))
 		b = b[8:]
 		if size > len(b) {
-			return nil, fmt.Errorf("chunk %q is cut short", id)
+			// ffmpeg writing to a pipe leaves the data's size at 0xFFFFFFFF,
+			// and a file cut short has less than it says. Read what is there.
+			if id != "data" {
+				return nil, fmt.Errorf("chunk %q is cut short", id)
+			}
+			size = len(b)
 		}
 		chunk := b[:size]
 		switch id {
@@ -77,6 +86,11 @@ func readWAV(b []byte) ([]float32, error) {
 			}
 			tag, channels := binary.LittleEndian.Uint16(chunk[0:]), binary.LittleEndian.Uint16(chunk[2:])
 			rate, bits := binary.LittleEndian.Uint32(chunk[4:]), binary.LittleEndian.Uint16(chunk[14:])
+			// WAVE_FORMAT_EXTENSIBLE: the format is the first 2 bytes of its
+			// subformat's GUID.
+			if tag == 0xFFFE && size >= 40 {
+				tag = binary.LittleEndian.Uint16(chunk[24:])
+			}
 			if tag != 1 || channels != 1 || rate != whisper.SampleRate || bits != 16 {
 				return nil, fmt.Errorf("want 16-bit PCM, mono, at %d Hz: got format %d, %d channels, %d Hz, %d bits", whisper.SampleRate, tag, channels, rate, bits)
 			}

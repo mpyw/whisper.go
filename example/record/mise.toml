@@ -28,5 +28,5 @@ fetch https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a
 [tasks.record]
 description = "Record from the microphone until Enter, then transcribe"
 depends = ["download"]
-# usage "--lang <lang>" passes its flags on, such as: mise run record -- -lang ja
+# The flags after -- go to the program, such as: mise run record -- -lang ja
 run = "go run . {{arg(name='flags', var=true, default='')}}"

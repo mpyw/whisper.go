@@ -24,7 +24,10 @@ whisper.go-wasm's branches hold no generated code. Only its release tags carry `
 ```sh
 go get github.com/mpyw/whisper.go-wasm@vX.Y.Z
 go mod tidy
+for d in example/*/; do (cd "$d" && go mod tidy); done
 ```
+
+Each example is its own module, which requires whisper.go-wasm too. Without its own `go mod tidy`, it fails to build with "updates to go.mod needed", and so does test.yml.
 
 Then run everything in AGENTS.md's "Before you finish".
 
