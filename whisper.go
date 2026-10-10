@@ -62,14 +62,14 @@ type Options struct {
 // TranscribeOptions configures one Transcribe call.
 type TranscribeOptions struct {
 	// Language is a code such as "en" or "ja", or a lowercase name such as
-	// "japanese". Empty, or "auto", detects it
-	// with a multilingual model. An English-only model transcribes English
-	// whatever it says.
+	// "japanese". Empty, or "auto", detects it with a multilingual model.
+	// An English-only model transcribes English whatever it says.
 	Language string
 	// Threads is how many threads the model runs on. Zero, a negative
-	// number, or more than GOMAXPROCS means GOMAXPROCS, and 32 is the most. ggml's threads spin
-	// while they wait for each other, so a thread without a CPU of its own
-	// slows all of them. Each takes 8 MiB of the module's memory.
+	// number, or more than GOMAXPROCS means GOMAXPROCS, and 32 is the most.
+	// ggml's threads spin while they wait for each other, so a thread
+	// without a CPU of its own slows all of them. Each takes 8 MiB of the
+	// module's memory.
 	Threads int
 }
 
