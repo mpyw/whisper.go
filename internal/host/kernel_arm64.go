@@ -35,13 +35,12 @@ func (c kernelHalfConverter) convert(h archsimd.Uint32x4) archsimd.Float32x4 {
 	return bits.Or(c.allOnes.Masked(em.GreaterEqual(c.infNaN))).BitsToFloat32()
 }
 
-// kernelDot16 is the products of 16 pairs of int8, summed into 4 lanes. A
-// product fits in int16, and a sum in int32.
+// kernelDot16 is the products of 16 pairs of int8, summed into 4 lanes. y
+// is a column of gw_quantize_row's, within ±127, so 2 products of at most
+// 128*127 add up in int16 before they widen.
 func kernelDot16(x, y archsimd.Int8x16) archsimd.Int32x4 {
-	lo := x.MulWidenLo(y)
-	hi := x.HiToLo().MulWidenLo(y.HiToLo())
-	return lo.ExtendLo4ToInt32().Add(lo.HiToLo().ExtendLo4ToInt32()).
-		Add(hi.ExtendLo4ToInt32()).Add(hi.HiToLo().ExtendLo4ToInt32())
+	p := x.MulWidenLo(y).Add(x.HiToLo().MulWidenLo(y.HiToLo()))
+	return p.ExtendLo4ToInt32().Add(p.HiToLo().ExtendLo4ToInt32())
 }
 
 // kernelFifthBits spreads the low 16 bits of qh to 16 bytes: 0x10 for a set

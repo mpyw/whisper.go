@@ -80,7 +80,7 @@ func TestKernelQuantized(t *testing.T) {
 			x := kernelRandomBlocks(rng, nb, f.xBlock, kernelHalfFields(typ))
 			var cols [4][]byte
 			for c := range cols {
-				cols[c] = kernelRandomBlocks(rng, nb, yBlock, kernelHalfFields(map[bool]int32{false: kernelTypeQ8_0, true: -1}[f.q8_1]))
+				cols[c] = kernelColumnValues(kernelRandomBlocks(rng, nb, yBlock, kernelHalfFields(map[bool]int32{false: kernelTypeQ8_0, true: -1}[f.q8_1])))
 			}
 
 			q, dm := make([]byte, n), make([]float32, 2*nb)
@@ -333,9 +333,20 @@ func kernelRandomColumn(rng *rand.Rand, typ int32, n int) []byte {
 		return kernelRandomHalves(rng, n)
 	}
 	if kernelFormats[typ].q8_1 {
-		return kernelRandomBlocks(rng, n/32, kernelBlockQ8_1, kernelHalfFields(-1))
+		return kernelColumnValues(kernelRandomBlocks(rng, n/32, kernelBlockQ8_1, kernelHalfFields(-1)))
 	}
-	return kernelRandomBlocks(rng, n/32, kernelBlockQ8_0, kernelHalfFields(kernelTypeQ8_0))
+	return kernelColumnValues(kernelRandomBlocks(rng, n/32, kernelBlockQ8_0, kernelHalfFields(kernelTypeQ8_0)))
+}
+
+// kernelColumnValues keeps a column of y within gw_quantize_row's ±127,
+// which the vector code counts on: it turns each -128 into -127.
+func kernelColumnValues(b []byte) []byte {
+	for i, v := range b {
+		if v == 0x80 {
+			b[i] = 0x81
+		}
+	}
+	return b
 }
 
 // kernelFloat32ToHalf rounds f to a nearby float16, for test data. It
@@ -353,42 +364,53 @@ func kernelFloat32ToHalf(f float32) uint16 {
 	return sign | uint16(exp)<<10 | uint16(b>>13&0x3ff)
 }
 
-// TestKernelNarrow checks the int16 sums of kernelDotQx4 at the limits of
-// q5_1 (x = 31), q5_0 (x = -16) and the q4 types, with y at -128 and 127.
+// TestKernelNarrow checks the int16 sums of the quantized kernels at the
+// limits of q5_1 (x = 31), q5_0 (x = -16) and the q4 types, with y at -128
+// and 127, and of q8_0 (x = -128), with y at gw_quantize_row's -127 and 127.
 func TestKernelNarrow(t *testing.T) {
-	for _, xv := range []int8{31, -16, 15, -8} {
-		for _, yv := range []int8{-128, 127} {
-			for _, q8_1 := range []bool{false, true} {
-				nb := 4
-				block, off := kernelYValues(q8_1)
-				q := make([]byte, 32*nb)
-				for i := range q {
-					q[i] = byte(xv)
-				}
-				dm := make([]float32, 2*nb)
-				for i := range dm {
-					dm[i] = 1
-				}
-				var cols [4][]byte
-				for c := range cols {
-					cols[c] = make([]byte, nb*block)
-					for ib := range nb {
-						for j := range 32 {
-							cols[c][ib*block+off+j] = byte(yv)
-						}
+	for _, tt := range []struct {
+		xv, yv int8
+		narrow bool
+	}{
+		{31, -128, true}, {31, 127, true}, {-16, -128, true}, {-16, 127, true},
+		{15, -128, true}, {15, 127, true}, {-8, -128, true}, {-8, 127, true},
+		{-128, -127, false}, {-128, 127, false}, {127, 127, false}, {127, -127, false},
+	} {
+		xv, yv := tt.xv, tt.yv
+		for _, q8_1 := range []bool{false, true} {
+			nb := 4
+			block, off := kernelYValues(q8_1)
+			q := make([]byte, 32*nb)
+			for i := range q {
+				q[i] = byte(xv)
+			}
+			dm := make([]float32, 2*nb)
+			for i := range dm {
+				dm[i] = 1
+			}
+			var cols [4][]byte
+			for c := range cols {
+				cols[c] = make([]byte, nb*block)
+				for ib := range nb {
+					for j := range 32 {
+						cols[c][ib*block+off+j] = byte(yv)
 					}
 				}
-				yd, ys := make([]float32, nb*kernelScaleStride), make([]float32, nb*kernelScaleStride)
-				for i := range yd {
-					yd[i], ys[i] = 1, 0
+			}
+			yd, ys := make([]float32, nb*kernelScaleStride), make([]float32, nb*kernelScaleStride)
+			for i := range yd {
+				yd[i], ys[i] = 1, 0
+			}
+			want := float32(int(xv) * int(yv) * 32 * nb)
+			got := kernelDotQx4(q, dm, cols, yd, ys, q8_1, tt.narrow)
+			g0, g1 := kernelDotQ2x4(q, q, dm, dm, cols, yd, ys, q8_1, tt.narrow)
+			for c := range got {
+				if got[c] != want || g0[c] != want || g1[c] != want {
+					t.Errorf("x=%d y=%d q8_1=%v: got %v, %v and %v, want %v", xv, yv, q8_1, got[c], g0[c], g1[c], want)
 				}
-				got := kernelDotQx4(q, dm, cols, yd, ys, q8_1, true)
-				want := float32(int(xv) * int(yv) * 32 * nb)
-				for c := range got {
-					if got[c] != want {
-						t.Errorf("x=%d y=%d q8_1=%v: got %v, want %v", xv, yv, q8_1, got[c], want)
-					}
-				}
+			}
+			if one := kernelDotQ(q, dm, cols[0], yd, ys, q8_1); one != want {
+				t.Errorf("x=%d y=%d q8_1=%v, one column: got %v, want %v", xv, yv, q8_1, one, want)
 			}
 		}
 	}
