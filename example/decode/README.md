@@ -1,7 +1,7 @@
 # Example: decode and transcribe any audio file
 
 Transcribes a WAV, MP3, FLAC or Ogg Vorbis file, at any sample rate, mono or stereo.
-[beep](https://github.com/gopxl/beep) decodes and resamples it in pure Go, so there is still no cgo and no ffmpeg.
+[beep](https://github.com/gopxl/beep) decodes it, and [go-resample](https://github.com/gojargo/go-resample) converts it to 16 kHz, both in pure Go, so there is still no cgo and no ffmpeg.
 
 ## Run
 
@@ -28,6 +28,7 @@ mise run transcribe -- speech.mp3    # your own file
 | AAC, Opus, video | No | Use ffmpeg: `ffmpeg -i in.m4a -ar 16000 -ac 1 -f f32le out.raw` |
 
 Every decoder also uses [pkg/errors](https://github.com/pkg/errors) (BSD-2-Clause).
+Resampling is [go-resample](https://github.com/gojargo/go-resample) (BSD-2-Clause), which follows [libsamplerate](https://github.com/libsndfile/libsamplerate) (BSD-2-Clause). A program built with it must carry its `LICENSE` and `NOTICE`.
 
 > [!NOTE]
 > go-mp3 keeps the silence the MP3 encoder adds, which ffmpeg removes. jfk's samples from an MP3 began 51 ms late, and ran 76 ms longer.
@@ -35,20 +36,28 @@ Every decoder also uses [pkg/errors](https://github.com/pkg/errors) (BSD-2-Claus
 
 ## What resampling leaves
 
-`beep.Resample` only interpolates, so the filters around it cannot remove every false tone.
-The worst left, against a test tone, measured through `decode` over tones up to each filter's pass edge:
+go-resample's `SincBestQuality` filters out what 16 kHz cannot hold, above 8 kHz, as it converts.
+The worst false tone left, against a test tone, measured through `decode` in 100 Hz steps up to 90% of the lower of the two half rates:
 
 | Source rate | Worst false tone |
 | --- | --- |
-| 8 kHz | -81 dB |
-| 11.025 kHz | -46 dB |
-| 12 kHz | -78 dB |
+| 8 or 12 kHz | -92 dB |
+| 11.025 or 22.05 kHz | -82 dB |
 | 16 kHz | None: it is only mixed |
-| 22.05 kHz | -32 dB, from a 6.5 kHz tone folded to 450 Hz |
-| 44.1, 48 or 96 kHz | -76 dB or less |
+| 32, 44.1, 48 or 96 kHz | -83 dB or less |
 
-Speech recognition copes with these. jfk, resampled by ffmpeg to each rate and back through `decode`, transcribed the same from 11.025 to 96 kHz. From 8 kHz, "Americans" became "American", as it did when ffmpeg resampled the 8 kHz file instead: 8 kHz holds nothing above 4 kHz.
-For the cleanest samples, resample with ffmpeg instead: `ffmpeg -i in.flac -ar 16000 -ac 1 -f f32le out.raw`.
+The test WAVs are 16-bit, whose own noise is near -90 dB.
+At the edge of the band, from 44.1 kHz:
+
+| Tone | Left |
+| --- | --- |
+| 7 kHz | All of it |
+| 7.5 kHz | -1 dB |
+| 7.8 kHz | -6 dB |
+| 8.1 to 8.5 kHz | -18 to -54 dB, folded to 7.5 to 7.9 kHz |
+| 8.7 kHz or more | -88 dB or less |
+
+jfk transcribed the same from 11.025, 22.05 and 48 kHz WAVs, and from a 44.1 kHz FLAC. From 8 kHz, "Americans" became "America", and "American" when ffmpeg resampled the 8 kHz file instead: 8 kHz holds nothing above 4 kHz.
 
 ## Tasks
 
@@ -64,11 +73,8 @@ For the cleanest samples, resample with ffmpeg instead: `ffmpeg -i in.flac -ar 1
 [`main.go`](main.go):
 
 1. `decode` opens the file with beep's decoder for its extension.
-2. beep gives every source as stereo, a mono one in both channels. `lowPass` takes the mean of the two as the mono sample.
-3. `to16k` converts it to 16 kHz with `beep.Resample`. That filters nothing, so `lowPass` filters around it:
-   - From a higher rate, `lowPass` first removes what is above 8 kHz, half of 16 kHz, which `beep.Resample` would fold into the speech. This makes decoding about 4 times slower: 3.8 s for 10 minutes of 48 kHz stereo, on an Apple M2 Pro.
-   - From a lower rate, `beep.Resample` adds copies of the speech above half that rate, and straight to 16 kHz some fold into the speech. `to16k` resamples to 48 kHz first, where `lowPass` removes the copies, and then keeps every third sample.
-4. A 16 kHz source is only mixed.
-5. `Transcribe` returns the segments, which it prints.
+2. `to16k` reads it in blocks. beep gives every source as stereo, a mono one in both channels, and `to16k` takes the mean of the two.
+3. Unless the source is 16 kHz already, `to16k` passes each block to go-resample, and keeps what comes out. It never holds the samples at the old rate: 10 minutes of 48 kHz stereo took 3.6 s and 114 MB, on an Apple M2 Pro.
+4. `Transcribe` returns the segments, which it prints.
 
 This is its own Go module. Its `go.mod` builds against this checkout of whisper.go, through `replace`.

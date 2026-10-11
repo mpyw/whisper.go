@@ -3,6 +3,7 @@ module github.com/mpyw/whisper.go/example/decode
 go 1.27.0
 
 require (
+	github.com/gojargo/go-resample v1.0.1
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/mpyw/whisper.go v0.0.0
 )

@@ -113,7 +113,8 @@ func TestDecodeResample(t *testing.T) {
 }
 
 // TestDecodeMix decodes a stereo WAV with a sine on the left only, at a rate
-// for each of to16k's paths: the mono is their mean, half the sine.
+// below, at and above whisper.SampleRate: the mono is their mean, half the
+// sine.
 func TestDecodeMix(t *testing.T) {
 	for _, rate := range []int{8000, 16000, 44100} {
 		pcm := decodeFinite(t, writeWAV(t, rate, 2, 0, func(c int, t float64) float64 {
@@ -168,8 +169,8 @@ func residual(pcm []float32, freq float64) float64 {
 }
 
 // TestDecodeImage decodes a 3 kHz sine at rates below whisper.SampleRate.
-// beep.Resample adds copies of it, at 5 kHz from 8 kHz and at 1975 Hz from
-// 11.025 kHz, which must go.
+// A resampler that only interpolates adds copies of it, at 5 kHz from 8 kHz
+// and at 1975 Hz from 11.025 kHz, which must go.
 func TestDecodeImage(t *testing.T) {
 	for _, rate := range []int{8000, 11025, 12000} {
 		pcm := decodeFinite(t, writeWAV(t, rate, 1, 0, sine(3000)))
