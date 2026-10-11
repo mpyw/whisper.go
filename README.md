@@ -45,10 +45,10 @@ It needs no cgo and no Wasm runtime: `go build` is enough.
 > | Your audio | How | Example |
 > | --- | --- | --- |
 > | WAV of 16-bit PCM, mono, at 16 kHz | The standard library: read the `data` chunk, and divide each sample by 32768. | [`example/jfk`](example/jfk) |
-> | WAV of 8, 16 or 24-bit PCM, MP3, FLAC or Ogg Vorbis, at any rate, mono or stereo | [beep](https://github.com/gopxl/beep) (MIT), in pure Go: decode, average the two channels, `beep.Resample` to 16 kHz, and filter around it, which leaves -32 dB or less. | [`example/decode`](example/decode) |
+> | WAV of 8, 16 or 24-bit PCM, MP3, FLAC or Ogg Vorbis, at any rate, mono or stereo | [beep](https://github.com/gopxl/beep) (MIT) to decode, and [go-resample](https://github.com/gojargo/go-resample) (BSD-2-Clause) to convert to 16 kHz, both in pure Go. | [`example/decode`](example/decode) |
 > | Anything else: AAC, Opus, video, WAV of 32-bit or float PCM, more than 2 channels | [ffmpeg](https://ffmpeg.org), not Go: `ffmpeg -i in.m4a -ar 16000 -ac 1 -f f32le out.raw` | |
 >
-> With beep:
+> With beep and go-resample:
 >
 > ```go
 > s, format, err := mp3.Decode(f) // or wav, flac, vorbis
@@ -56,23 +56,25 @@ It needs no cgo and no Wasm runtime: `go build` is enough.
 > 	return nil, err
 > }
 > defer s.Close()
-> r := to16k(s, int(format.SampleRate)) // in example/decode: filters, resamples and mixes to mono
 > var pcm []float32
 > buf := make([][2]float64, 4096)
 > for {
-> 	n, ok := r.Stream(buf)
+> 	n, ok := s.Stream(buf)
 > 	for _, frame := range buf[:n] {
-> 		pcm = append(pcm, float32(frame[0]))
+> 		pcm = append(pcm, float32((frame[0]+frame[1])/2)) // beep gives mono as two equal channels
 > 	}
 > 	if !ok {
 > 		break
 > 	}
 > }
-> return pcm, r.Err()
+> if err := s.Err(); err != nil {
+> 	return nil, err
+> }
+> return resample.Simple(pcm, whisper.SampleRate/float64(format.SampleRate), 1, resample.SincBestQuality)
 > ```
 >
-> `beep.Resample` filters nothing, so on its own it adds false tones to the speech: a 9 kHz tone at 44.1 kHz came out at 7 kHz, at full strength.
-> `to16k` filters around it, down to -46 dB or less from most rates. See [what is left](example/decode#what-resampling-leaves), by rate.
+> `SincBestQuality` filters as it converts. It leaves false tones of -82 dB or less, except from tones just above 8 kHz: 8.1 to 8.5 kHz fold back at -18 to -54 dB. See [what is left](example/decode#what-resampling-leaves), by rate.
+> `resample.Simple` holds the samples at the old rate too. `example/decode` passes them in blocks instead, which keeps the memory of 10 minutes of 48 kHz stereo at 114 MB.
 
 whisper.go is a library. For a command-line tool, use whisper.cpp's own `whisper-cli`: it reads audio files, and can use a GPU.
 

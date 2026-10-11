@@ -1,6 +1,6 @@
 // Command decode transcribes an audio file: WAV, MP3, FLAC or Ogg Vorbis, at
-// any sample rate, mono or stereo. beep decodes and resamples it, in pure
-// Go, to the samples whisper.go takes.
+// any sample rate, mono or stereo. beep decodes it, and go-resample converts
+// it to 16 kHz, both in pure Go.
 //
 //	mise run transcribe -- speech.mp3
 package main
@@ -10,11 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/gojargo/go-resample"
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/flac"
 	"github.com/gopxl/beep/v2/mp3"
@@ -83,19 +83,8 @@ func decode(path string) ([]float32, error) {
 		return nil, fmt.Errorf("%d channels: mix them to mono with ffmpeg first", format.NumChannels)
 	}
 
-	r := to16k(s, int(format.SampleRate))
-	var pcm []float32
-	buf := make([][2]float64, 4096)
-	for {
-		n, ok := r.Stream(buf)
-		for _, frame := range buf[:n] {
-			pcm = append(pcm, float32(frame[0]))
-		}
-		if !ok {
-			break
-		}
-	}
-	if err := r.Err(); err != nil {
+	pcm, err := to16k(s, int(format.SampleRate))
+	if err != nil {
 		return nil, err
 	}
 	// beep reads a WAV of unknown size, as ffmpeg writes to a pipe, or of
@@ -106,94 +95,65 @@ func decode(path string) ([]float32, error) {
 	return pcm, nil
 }
 
-// to16k resamples s, mono or stereo at rate, to mono at whisper.SampleRate.
-//
-// beep.Resample filters nothing. Down to 16 kHz, it would fold what is
-// above 8 kHz into the speech, so lowPass removes that first. Up from a
-// lower rate, it makes copies of the speech at the old rate's multiples,
-// plus and minus each frequency. From 11.025 kHz straight to 16 kHz, the
-// copy of a 4 kHz tone at 15.025 kHz folded to 975 Hz, at -36 dB, where no
-// filter after can reach it. Up to 48 kHz, three times 16 kHz, the copies
-// stay above 8 kHz: lowPass removes them there, and 48 kHz to 16 kHz keeps
-// every third sample. README.md lists what is left, by rate.
-func to16k(s beep.Streamer, rate int) beep.Streamer {
-	const up = 3 * whisper.SampleRate
-	switch {
-	case rate > whisper.SampleRate:
-		return beep.Resample(4, beep.SampleRate(rate), whisper.SampleRate, newLowPass(s, rate, 7500, 2000))
-	case rate < whisper.SampleRate:
-		return beep.Resample(4, up, whisper.SampleRate, newLowPass(beep.Resample(4, beep.SampleRate(rate), up, s), up, rate/2, 1000))
-	default:
-		return newLowPass(s, rate, rate/2, 0) // it only mixes
+// to16k reads s, sampled at rate, as mono at whisper.SampleRate. It
+// resamples as it reads, so it never holds the samples at the old rate.
+// SincBestQuality filters out what 16 kHz cannot hold, above 8 kHz. README.md
+// lists what is left.
+func to16k(s beep.Streamer, rate int) ([]float32, error) {
+	r, err := resample.New(resample.SincBestQuality, 1)
+	if err != nil {
+		return nil, err
 	}
-}
-
-// lowPass mixes a source to mono, and removes what lies above a cutoff. It
-// is a windowed-sinc filter: it passes up to cutoff-width/2, stops from
-// cutoff+width/2, and delays nothing.
-type lowPass struct {
-	s    beep.Streamer
-	h    []float64    // the filter, of 2*half+1 taps
-	x    []float64    // the mono samples ahead, after the half before them
-	buf  [][2]float64 // read from s
-	done bool         // s has ended
-}
-
-// newLowPass filters s, sampled at rate, at cutoff Hz, with a transition
-// width Hz wide. A cutoff at half the rate or above has nothing to remove,
-// and only mixes.
-func newLowPass(s beep.Streamer, rate, cutoff, width int) *lowPass {
-	half := 0
-	if 2*cutoff < rate {
-		half = 11 * rate / (4 * width) // a Blackman window is 5.5 rate/width taps
-	}
-	fc := float64(cutoff) / float64(rate)
-	h := make([]float64, 2*half+1)
-	var sum float64
-	for i := range h {
-		t := float64(i - half)
-		h[i] = 1
-		if half > 0 {
-			h[i] = 0.42 + 0.5*math.Cos(math.Pi*t/float64(half)) + 0.08*math.Cos(2*math.Pi*t/float64(half))
-		}
-		if t != 0 {
-			h[i] *= math.Sin(2*math.Pi*fc*t) / (math.Pi * t)
-		} else {
-			h[i] *= 2 * fc
-		}
-		sum += h[i]
-	}
-	for i := range h {
-		h[i] /= sum
-	}
-	return &lowPass{s: s, h: h, x: make([]float64, half), buf: make([][2]float64, 4096)}
-}
-
-func (f *lowPass) Stream(out [][2]float64) (int, bool) {
-	half := len(f.h) / 2
-	for !f.done && len(f.x) < len(out)+2*half {
-		n, ok := f.s.Stream(f.buf)
+	// ratio is how many samples come out for each one in: 16000/44100, about
+	// 0.36, from 44.1 kHz, and 2 from 8 kHz.
+	ratio := float64(whisper.SampleRate) / float64(rate)
+	// buf takes one block from beep: 4096 frames, a left and a right sample
+	// each. in holds the same block as mono, and out what go-resample makes
+	// of it. All three are reused for every block.
+	buf := make([][2]float64, 4096)
+	in := make([]float32, 0, len(buf))
+	out := make([]float32, 4096)
+	var pcm []float32 // every sample at 16 kHz, the result
+	for {
+		// n is how many frames beep put in buf. ok is false once the file
+		// has ended.
+		n, ok := s.Stream(buf)
 		// beep gives every source as stereo: a mono one in both channels.
-		// Their mean is the mono whisper.go takes.
-		for _, frame := range f.buf[:n] {
-			f.x = append(f.x, (frame[0]+frame[1])/2)
+		// The mean of left and right is the mono whisper.go takes.
+		in = in[:0]
+		for _, frame := range buf[:n] {
+			left, right := frame[0], frame[1]
+			in = append(in, float32((left+right)/2))
+		}
+		if rate == whisper.SampleRate {
+			pcm = append(pcm, in...) // already 16 kHz: nothing to convert
+		} else {
+			d := resample.Data{
+				In:           in,
+				InputFrames:  len(in),
+				Out:          out,
+				OutputFrames: len(out), // room in out
+				Ratio:        ratio,
+				// The last block: give out every sample left, rather than
+				// wait for samples after them.
+				EndOfInput: !ok,
+			}
+			// Process keeps all of in, and fills out as far as it can.
+			// OutputFramesGen says how far. When out is full, there may be
+			// more: ask again, with no new input.
+			for {
+				if err := r.Process(&d); err != nil {
+					return nil, err
+				}
+				pcm = append(pcm, out[:d.OutputFramesGen]...)
+				if d.OutputFramesGen < len(out) {
+					break // all of this block is out
+				}
+				d.InputFrames = 0 // in is kept already: do not pass it twice
+			}
 		}
 		if !ok {
-			f.done = true
-			f.x = append(f.x, make([]float64, half)...)
+			return pcm, s.Err()
 		}
 	}
-	n := max(0, min(len(out), len(f.x)-2*half))
-	for i := range n {
-		var v float64
-		w := f.x[i : i+len(f.h)]
-		for k, hk := range f.h {
-			v += hk * w[k]
-		}
-		out[i] = [2]float64{v, v}
-	}
-	f.x = f.x[n:]
-	return n, n > 0
 }
-
-func (f *lowPass) Err() error { return f.s.Err() }
