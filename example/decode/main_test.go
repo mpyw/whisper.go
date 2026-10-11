@@ -13,10 +13,7 @@ import (
 // TestDecode decodes testdata/jfk.wav, already 16 kHz and mono: resampling
 // it to the same rate keeps its length.
 func TestDecode(t *testing.T) {
-	pcm, err := decode("../../testdata/jfk.wav")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pcm := decodeFinite(t, "../../testdata/jfk.wav")
 	if want := 176000; len(pcm) != want {
 		t.Errorf("%d samples, want %d: 11 s at %d Hz", len(pcm), want, whisper.SampleRate)
 	}
@@ -27,6 +24,23 @@ func TestDecode(t *testing.T) {
 	if peak < 0.1 || peak > 1 {
 		t.Errorf("peak %v, want speech within [-1, 1]", peak)
 	}
+}
+
+// decodeFinite decodes path, and fails the test if a sample is NaN or
+// infinite. A NaN passes every comparison the tests make: a filter of NaN
+// taps passed them all, and whisper.go reads NaN as silence.
+func decodeFinite(t *testing.T, path string) []float32 {
+	t.Helper()
+	pcm, err := decode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, v := range pcm {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			t.Fatalf("%s: sample %d is %v", path, i, v)
+		}
+	}
+	return pcm
 }
 
 func TestDecodeUnknown(t *testing.T) {
@@ -87,10 +101,7 @@ func rms(pcm []float32) float64 {
 func TestDecodeResample(t *testing.T) {
 	for _, rate := range []int{8000, 16000, 22050, 44100, 48000, 96000} {
 		for _, channels := range []int{1, 2} {
-			pcm, err := decode(writeWAV(t, rate, channels, 0, sine(1000)))
-			if err != nil {
-				t.Fatal(err)
-			}
+			pcm := decodeFinite(t, writeWAV(t, rate, channels, 0, sine(1000)))
 			if d := len(pcm) - whisper.SampleRate; d < -1 || d > 1 {
 				t.Errorf("%d Hz, %d channels: %d samples, want %d", rate, channels, len(pcm), whisper.SampleRate)
 			}
@@ -105,15 +116,12 @@ func TestDecodeResample(t *testing.T) {
 // for each of to16k's paths: the mono is their mean, half the sine.
 func TestDecodeMix(t *testing.T) {
 	for _, rate := range []int{8000, 16000, 44100} {
-		pcm, err := decode(writeWAV(t, rate, 2, 0, func(c int, t float64) float64 {
+		pcm := decodeFinite(t, writeWAV(t, rate, 2, 0, func(c int, t float64) float64 {
 			if c == 1 {
 				return 0
 			}
 			return sine(1000)(c, t)
 		}))
-		if err != nil {
-			t.Fatal(err)
-		}
 		if got, want := rms(pcm), 0.25/math.Sqrt2; math.Abs(got-want) > 0.01*want {
 			t.Errorf("%d Hz: RMS %.4f, want %.4f", rate, got, want)
 		}
@@ -132,10 +140,7 @@ func TestDecodeAlias(t *testing.T) {
 		{12000, 0, 0.001},
 		{20000, 0, 0.001},
 	} {
-		pcm, err := decode(writeWAV(t, 44100, 1, 0, sine(tt.freq)))
-		if err != nil {
-			t.Fatal(err)
-		}
+		pcm := decodeFinite(t, writeWAV(t, 44100, 1, 0, sine(tt.freq)))
 		if got := rms(pcm) / (0.5 / math.Sqrt2); got < tt.min || got > tt.max {
 			t.Errorf("%v Hz: RMS %.4f of the input's, want %v to %v", tt.freq, got, tt.min, tt.max)
 		}
@@ -167,10 +172,7 @@ func residual(pcm []float32, freq float64) float64 {
 // 11.025 kHz, which must go.
 func TestDecodeImage(t *testing.T) {
 	for _, rate := range []int{8000, 11025, 12000} {
-		pcm, err := decode(writeWAV(t, rate, 1, 0, sine(3000)))
-		if err != nil {
-			t.Fatal(err)
-		}
+		pcm := decodeFinite(t, writeWAV(t, rate, 1, 0, sine(3000)))
 		if got := residual(pcm, 3000); got > 0.001 {
 			t.Errorf("%d Hz: %.4f of the 3 kHz sine is something else, want 0.001 or less", rate, got)
 		}

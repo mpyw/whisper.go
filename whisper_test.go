@@ -361,8 +361,12 @@ func TestTranscribeTooLong(t *testing.T) {
 	}
 	m := testNew(t)
 	free := m.Fill(64 << 20)
-	if _, err := m.Transcribe(context.Background(), make([]float32, 10*60*whisper.SampleRate), nil); !errors.Is(err, whisper.ErrTooLong) {
-		t.Fatalf("err = %v, want ErrTooLong", err)
+	// 10 minutes fit the room, and gw_full finds no room for the rest. 20
+	// minutes do not: Transcribe's own malloc fails.
+	for _, minutes := range []int{10, 20} {
+		if _, err := m.Transcribe(context.Background(), make([]float32, minutes*60*whisper.SampleRate), nil); !errors.Is(err, whisper.ErrTooLong) {
+			t.Fatalf("%d minutes: err = %v, want ErrTooLong", minutes, err)
+		}
 	}
 	free()
 	if _, err := m.Transcribe(context.Background(), make([]float32, whisper.SampleRate), nil); err != nil {
@@ -563,5 +567,61 @@ func TestCloseWhileWaiting(t *testing.T) {
 		if err := <-waiting; !errors.Is(err, whisper.ErrClosed) {
 			t.Errorf("a waiting call: err = %v, want ErrClosed", err)
 		}
+	}
+}
+
+// TestCloseFreesMemory loads and closes models, and fails to load a model
+// cut short. Neither may keep the memory: a model took 176 MiB, and a load
+// that failed 67 MiB.
+func TestCloseFreesMemory(t *testing.T) {
+	if testSlowdown > 1 {
+		t.Skip("it takes minutes under the race detector, and runs nothing at once")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("it reads the RSS with ps")
+	}
+	b := testModel(t)
+	before := testRSS(t)
+	for range 8 {
+		m, err := whisper.New(b, &whisper.Options{Log: io.Discard})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := m.Transcribe(context.Background(), make([]float32, whisper.SampleRate), nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := whisper.New(b[:len(b)-1000], &whisper.Options{Log: io.Discard}); err == nil {
+			t.Fatal("New accepted a model cut short")
+		}
+	}
+	if grew := testRSS(t) - before; grew > 256<<20 {
+		t.Errorf("the RSS grew %d MiB over 8 models closed and 8 that failed to load", grew>>20)
+	}
+}
+
+// TestTranscribeFreesAudio transcribes a minute 4 times. The module's copy
+// of the samples, 3.7 MiB, must go after each call: the room the module has
+// left stays the same.
+func TestTranscribeFreesAudio(t *testing.T) {
+	if testSlowdown > 1 {
+		t.Skip("it takes minutes under the race detector, and runs nothing at once")
+	}
+	m := testNew(t)
+	pcm := make([]float32, 60*whisper.SampleRate)
+	// The first call takes the memory every call needs.
+	if _, err := m.Transcribe(context.Background(), pcm, nil); err != nil {
+		t.Fatal(err)
+	}
+	before := m.Room()
+	for range 3 {
+		if _, err := m.Transcribe(context.Background(), pcm, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if lost := before - m.Room(); lost > 2<<20 {
+		t.Errorf("the module has %d MiB less room after 3 calls", lost>>20)
 	}
 }

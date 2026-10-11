@@ -53,6 +53,8 @@ func TestReadWAV(t *testing.T) {
 	want := []float32{0, 0.5, -1, 32767.0 / 32768}
 	format := wavFormat(1, 16000, false)
 	data := wavChunk("data", uint32(len(samples)), samples)
+	bits24 := wavFormat(1, 16000, false)
+	binary.LittleEndian.PutUint16(bits24[8+14:], 24) // after the chunk's header
 	for _, tt := range []struct {
 		name string
 		file []byte
@@ -65,11 +67,13 @@ func TestReadWAV(t *testing.T) {
 		{"cut short in the data", wavFile(format, wavChunk("data", 100, samples)), want},
 		{"stereo", wavFile(wavFormat(2, 16000, false), data), nil},
 		{"44.1 kHz", wavFile(wavFormat(1, 44100, false), data), nil},
+		{"24 bits", wavFile(bits24, data), nil},
 		{"no fmt chunk", wavFile(data), nil},
 		{"no data chunk", wavFile(format), nil},
 		{"cut short in the fmt chunk", wavFile(format[:12]), nil},
 		{"a fmt chunk under 16 bytes", wavFile(wavChunk("fmt ", 14, format[8:22]), data), nil},
 		{"not a WAV file", []byte("ID3\x04 an MP3 file"), nil},
+		{"an empty file", nil, nil},
 	} {
 		got, err := readWAV(tt.file)
 		switch {
