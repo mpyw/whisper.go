@@ -104,34 +104,52 @@ func to16k(s beep.Streamer, rate int) ([]float32, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ratio is how many samples come out for each one in: 16000/44100, about
+	// 0.36, from 44.1 kHz, and 2 from 8 kHz.
 	ratio := float64(whisper.SampleRate) / float64(rate)
+	// buf takes one block from beep: 4096 frames, a left and a right sample
+	// each. in holds the same block as mono, and out what go-resample makes
+	// of it. All three are reused for every block.
 	buf := make([][2]float64, 4096)
 	in := make([]float32, 0, len(buf))
 	out := make([]float32, 4096)
-	var pcm []float32
+	var pcm []float32 // every sample at 16 kHz, the result
 	for {
+		// n is how many frames beep put in buf. ok is false once the file
+		// has ended.
 		n, ok := s.Stream(buf)
 		// beep gives every source as stereo: a mono one in both channels.
-		// Their mean is the mono whisper.go takes.
+		// The mean of left and right is the mono whisper.go takes.
 		in = in[:0]
 		for _, frame := range buf[:n] {
-			in = append(in, float32((frame[0]+frame[1])/2))
+			left, right := frame[0], frame[1]
+			in = append(in, float32((left+right)/2))
 		}
 		if rate == whisper.SampleRate {
-			pcm = append(pcm, in...)
+			pcm = append(pcm, in...) // already 16 kHz: nothing to convert
 		} else {
-			d := resample.Data{In: in, InputFrames: len(in), Out: out, OutputFrames: len(out), Ratio: ratio, EndOfInput: !ok}
-			// Process takes all of in, and fills out as far as it can. A
-			// full out may have more to come: ask again, with no input.
+			d := resample.Data{
+				In:           in,
+				InputFrames:  len(in),
+				Out:          out,
+				OutputFrames: len(out), // room in out
+				Ratio:        ratio,
+				// The last block: give out every sample left, rather than
+				// wait for samples after them.
+				EndOfInput: !ok,
+			}
+			// Process keeps all of in, and fills out as far as it can.
+			// OutputFramesGen says how far. When out is full, there may be
+			// more: ask again, with no new input.
 			for {
 				if err := r.Process(&d); err != nil {
 					return nil, err
 				}
 				pcm = append(pcm, out[:d.OutputFramesGen]...)
 				if d.OutputFramesGen < len(out) {
-					break
+					break // all of this block is out
 				}
-				d.InputFrames = 0
+				d.InputFrames = 0 // in is kept already: do not pass it twice
 			}
 		}
 		if !ok {
